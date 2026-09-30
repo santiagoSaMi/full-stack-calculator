@@ -1,302 +1,306 @@
-package server
+package server_test
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/santiagoSaMi/full-stack-calculator/backend/internal/server"
 )
 
-const calculatePath = "/api/v1/calculate"
+const (
+	calculatePath = "/api/v1/calculate"
+	jsonType      = "application/json"
+)
 
-// doCalculate sends body to the calculate endpoint with the given
-// Content-Type and returns the recorded response.
-func doCalculate(t *testing.T, contentType, body string) *httptest.ResponseRecorder {
+// newTestServer starts a real HTTP server backed by the application handler
+// and closes it when the test ends.
+func newTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, calculatePath, strings.NewReader(body))
+	ts := httptest.NewServer(server.NewHandler())
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+// response is the relevant part of an HTTP response, read in full.
+type response struct {
+	status int
+	header http.Header
+	body   []byte
+}
+
+// send performs an HTTP request against ts and returns the full response.
+// An empty contentType sends no Content-Type header.
+func send(t *testing.T, ts *httptest.Server, method, path, contentType, body string) response {
+	t.Helper()
+	req, err := http.NewRequest(method, ts.URL+path, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
-	rec := httptest.NewRecorder()
-	NewHandler().ServeHTTP(rec, req)
-	return rec
+
+	res, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatalf("send request: %v", err)
+	}
+	defer res.Body.Close()
+
+	data, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	return response{status: res.StatusCode, header: res.Header, body: data}
 }
 
-func assertJSONContentType(t *testing.T, rec *httptest.ResponseRecorder) {
+// assertJSON checks the Content-Type and that the body is exactly the JSON
+// document want: same keys and same values, with no extra fields.
+func assertJSON(t *testing.T, res response, want string) {
 	t.Helper()
-	if got := rec.Header().Get("Content-Type"); got != "application/json" {
-		t.Errorf("Content-Type = %q, want %q", got, "application/json")
+	if got := res.header.Get("Content-Type"); got != jsonType {
+		t.Errorf("Content-Type = %q, want %q", got, jsonType)
+	}
+
+	var gotBody, wantBody any
+	if err := json.Unmarshal(res.body, &gotBody); err != nil {
+		t.Fatalf("response body is not valid JSON: %v; body = %s", err, res.body)
+	}
+	if err := json.Unmarshal([]byte(want), &wantBody); err != nil {
+		t.Fatalf("invalid expected JSON in test: %v", err)
+	}
+	if !reflect.DeepEqual(gotBody, wantBody) {
+		t.Errorf("body = %s, want %s", strings.TrimSpace(string(res.body)), want)
 	}
 }
 
-func TestCalculateSuccess(t *testing.T) {
-	tests := []struct {
-		name string
-		body string
-		want float64
-	}{
-		{"add", `{"operation":"add","a":10,"b":5}`, 15},
-		{"subtract", `{"operation":"subtract","a":10,"b":5}`, 5},
-		{"multiply", `{"operation":"multiply","a":10,"b":5}`, 50},
-		{"divide", `{"operation":"divide","a":10,"b":5}`, 2},
-		{"negative operands", `{"operation":"add","a":-10,"b":-5}`, -15},
-		{"decimal operands", `{"operation":"multiply","a":1.5,"b":2.5}`, 3.75},
-		{"fractional quotient", `{"operation":"divide","a":1,"b":4}`, 0.25},
-		{"explicit zero operands", `{"operation":"add","a":0,"b":0}`, 0},
-		{"zero dividend", `{"operation":"divide","a":0,"b":5}`, 0},
-		{"exponent notation", `{"operation":"add","a":1e3,"b":2E-1}`, 1000.2},
-		{"fields in any order", `{"b":5,"a":10,"operation":"subtract"}`, 5},
-		{"surrounding whitespace", "\n  {\"operation\":\"add\",\"a\":1,\"b\":2}  \n", 3},
-	}
+// apiCase is one request to the calculate endpoint and its expected response.
+type apiCase struct {
+	name        string
+	method      string // defaults to POST
+	contentType string // defaults to application/json; "-" sends none
+	body        string
+	wantStatus  int
+	wantBody    string
+}
+
+func runAPICases(t *testing.T, tests []apiCase) {
+	t.Helper()
+	ts := newTestServer(t)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rec := doCalculate(t, "application/json", tt.body)
+			method := tt.method
+			if method == "" {
+				method = http.MethodPost
+			}
+			contentType := tt.contentType
+			switch contentType {
+			case "":
+				contentType = jsonType
+			case "-":
+				contentType = ""
+			}
 
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusOK, rec.Body)
-			}
-			assertJSONContentType(t, rec)
+			res := send(t, ts, method, calculatePath, contentType, tt.body)
 
-			var resp calculateResponse
-			if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-				t.Fatalf("decode response: %v", err)
+			if res.status != tt.wantStatus {
+				t.Errorf("status = %d, want %d", res.status, tt.wantStatus)
 			}
-			if resp.Result != tt.want {
-				t.Errorf("result = %v, want %v", resp.Result, tt.want)
-			}
+			assertJSON(t, res, tt.wantBody)
 		})
 	}
 }
 
-func TestCalculateResponseShape(t *testing.T) {
-	rec := doCalculate(t, "application/json", `{"operation":"add","a":10,"b":5}`)
-
-	if got, want := rec.Body.String(), "{\"result\":15}\n"; got != want {
-		t.Errorf("body = %q, want %q", got, want)
-	}
+func TestCalculateAddition(t *testing.T) {
+	runAPICases(t, []apiCase{
+		{name: "positive", body: `{"operation":"add","a":10,"b":5}`, wantStatus: 200, wantBody: `{"result":15}`},
+		{name: "negative", body: `{"operation":"add","a":-10,"b":-5}`, wantStatus: 200, wantBody: `{"result":-15}`},
+		{name: "mixed signs", body: `{"operation":"add","a":-10,"b":5}`, wantStatus: 200, wantBody: `{"result":-5}`},
+		{name: "decimal", body: `{"operation":"add","a":1.5,"b":2.25}`, wantStatus: 200, wantBody: `{"result":3.75}`},
+		{name: "zero", body: `{"operation":"add","a":0,"b":0}`, wantStatus: 200, wantBody: `{"result":0}`},
+		{name: "exponent notation", body: `{"operation":"add","a":1e3,"b":2E-1}`, wantStatus: 200, wantBody: `{"result":1000.2}`},
+	})
 }
 
-func TestCalculateErrors(t *testing.T) {
-	tests := []struct {
-		name        string
-		contentType string
-		body        string
-		wantStatus  int
-		wantError   string
-	}{
-		// Domain errors.
+func TestCalculateSubtraction(t *testing.T) {
+	runAPICases(t, []apiCase{
+		{name: "positive result", body: `{"operation":"subtract","a":10,"b":5}`, wantStatus: 200, wantBody: `{"result":5}`},
+		{name: "negative result", body: `{"operation":"subtract","a":5,"b":10}`, wantStatus: 200, wantBody: `{"result":-5}`},
+		{name: "negative operands", body: `{"operation":"subtract","a":-2,"b":-3}`, wantStatus: 200, wantBody: `{"result":1}`},
+		{name: "decimal", body: `{"operation":"subtract","a":5.5,"b":2.25}`, wantStatus: 200, wantBody: `{"result":3.25}`},
+		{name: "zero", body: `{"operation":"subtract","a":0,"b":5}`, wantStatus: 200, wantBody: `{"result":-5}`},
+	})
+}
+
+func TestCalculateMultiplication(t *testing.T) {
+	runAPICases(t, []apiCase{
+		{name: "positive", body: `{"operation":"multiply","a":10,"b":5}`, wantStatus: 200, wantBody: `{"result":50}`},
+		{name: "mixed signs", body: `{"operation":"multiply","a":-4,"b":3}`, wantStatus: 200, wantBody: `{"result":-12}`},
+		{name: "negative operands", body: `{"operation":"multiply","a":-4,"b":-3}`, wantStatus: 200, wantBody: `{"result":12}`},
+		{name: "decimal", body: `{"operation":"multiply","a":1.5,"b":2.5}`, wantStatus: 200, wantBody: `{"result":3.75}`},
+		{name: "by zero", body: `{"operation":"multiply","a":7,"b":0}`, wantStatus: 200, wantBody: `{"result":0}`},
 		{
-			name: "division by zero", contentType: "application/json",
-			body:       `{"operation":"divide","a":10,"b":0}`,
-			wantStatus: http.StatusUnprocessableEntity, wantError: "division by zero",
-		},
-		{
-			name: "division of zero by zero", contentType: "application/json",
-			body:       `{"operation":"divide","a":0,"b":0}`,
-			wantStatus: http.StatusUnprocessableEntity, wantError: "division by zero",
-		},
-		{
-			name: "overflow to infinity", contentType: "application/json",
+			name:       "overflow",
 			body:       `{"operation":"multiply","a":1e308,"b":10}`,
-			wantStatus: http.StatusUnprocessableEntity, wantError: "result is out of range",
+			wantStatus: 422, wantBody: `{"error":"result is out of range"}`,
 		},
-
-		// Unsupported operations.
-		{
-			name: "unknown operation", contentType: "application/json",
-			body:       `{"operation":"modulo","a":10,"b":5}`,
-			wantStatus: http.StatusBadRequest,
-			wantError:  `unsupported operation "modulo": must be one of add, subtract, multiply, divide`,
-		},
-		{
-			name: "operation is case sensitive", contentType: "application/json",
-			body:       `{"operation":"ADD","a":10,"b":5}`,
-			wantStatus: http.StatusBadRequest,
-			wantError:  `unsupported operation "ADD": must be one of add, subtract, multiply, divide`,
-		},
-		{
-			name: "operator symbol", contentType: "application/json",
-			body:       `{"operation":"+","a":10,"b":5}`,
-			wantStatus: http.StatusBadRequest,
-			wantError:  `unsupported operation "+": must be one of add, subtract, multiply, divide`,
-		},
-
-		// Missing or null fields.
-		{
-			name: "missing operation", contentType: "application/json",
-			body:       `{"a":10,"b":5}`,
-			wantStatus: http.StatusBadRequest, wantError: `field "operation" is required`,
-		},
-		{
-			name: "empty operation", contentType: "application/json",
-			body:       `{"operation":"","a":10,"b":5}`,
-			wantStatus: http.StatusBadRequest, wantError: `field "operation" is required`,
-		},
-		{
-			name: "missing a", contentType: "application/json",
-			body:       `{"operation":"add","b":5}`,
-			wantStatus: http.StatusBadRequest, wantError: `field "a" is required`,
-		},
-		{
-			name: "missing b", contentType: "application/json",
-			body:       `{"operation":"add","a":10}`,
-			wantStatus: http.StatusBadRequest, wantError: `field "b" is required`,
-		},
-		{
-			name: "null a", contentType: "application/json",
-			body:       `{"operation":"add","a":null,"b":5}`,
-			wantStatus: http.StatusBadRequest, wantError: `field "a" is required`,
-		},
-		{
-			name: "empty object", contentType: "application/json",
-			body:       `{}`,
-			wantStatus: http.StatusBadRequest, wantError: `field "operation" is required`,
-		},
-
-		// Wrong field types.
-		{
-			name: "string operand", contentType: "application/json",
-			body:       `{"operation":"add","a":"10","b":5}`,
-			wantStatus: http.StatusBadRequest, wantError: `field "a" has an invalid type`,
-		},
-		{
-			name: "boolean operand", contentType: "application/json",
-			body:       `{"operation":"add","a":10,"b":true}`,
-			wantStatus: http.StatusBadRequest, wantError: `field "b" has an invalid type`,
-		},
-		{
-			name: "numeric operation", contentType: "application/json",
-			body:       `{"operation":1,"a":10,"b":5}`,
-			wantStatus: http.StatusBadRequest, wantError: `field "operation" has an invalid type`,
-		},
-		{
-			name: "operand outside float64 range", contentType: "application/json",
-			body:       `{"operation":"add","a":1e400,"b":5}`,
-			wantStatus: http.StatusBadRequest, wantError: `field "a" has an invalid type`,
-		},
-
-		// Malformed or unexpected bodies.
-		{
-			name: "empty body", contentType: "application/json",
-			body:       ``,
-			wantStatus: http.StatusBadRequest, wantError: "request body must not be empty",
-		},
-		{
-			name: "truncated JSON", contentType: "application/json",
-			body:       `{"operation":"add","a":10`,
-			wantStatus: http.StatusBadRequest, wantError: "request body contains malformed JSON",
-		},
-		{
-			name: "invalid JSON syntax", contentType: "application/json",
-			body:       `{operation: add}`,
-			wantStatus: http.StatusBadRequest, wantError: "request body contains malformed JSON",
-		},
-		{
-			name: "trailing comma", contentType: "application/json",
-			body:       `{"operation":"add","a":10,"b":5,}`,
-			wantStatus: http.StatusBadRequest, wantError: "request body contains malformed JSON",
-		},
-		{
-			name: "array instead of object", contentType: "application/json",
-			body:       `[1,2]`,
-			wantStatus: http.StatusBadRequest, wantError: "request body must be a valid JSON object",
-		},
-		{
-			name: "unknown field", contentType: "application/json",
-			body:       `{"operation":"add","a":10,"b":5,"c":1}`,
-			wantStatus: http.StatusBadRequest, wantError: `request body contains unknown field "c"`,
-		},
-		{
-			name: "multiple JSON objects", contentType: "application/json",
-			body:       `{"operation":"add","a":10,"b":5}{"operation":"add","a":1,"b":1}`,
-			wantStatus: http.StatusBadRequest, wantError: "request body must contain a single JSON object",
-		},
-		{
-			name: "trailing garbage", contentType: "application/json",
-			body:       `{"operation":"add","a":10,"b":5}}`,
-			wantStatus: http.StatusBadRequest, wantError: "request body must contain a single JSON object",
-		},
-		{
-			name: "body too large", contentType: "application/json",
-			body:       `{"operation":"add","a":10,"b":5,"pad":"` + strings.Repeat("x", maxRequestBytes) + `"}`,
-			wantStatus: http.StatusRequestEntityTooLarge, wantError: "request body must not exceed 1024 bytes",
-		},
-
-		// Content-Type.
-		{
-			name: "missing content type", contentType: "",
-			body:       `{"operation":"add","a":10,"b":5}`,
-			wantStatus: http.StatusUnsupportedMediaType, wantError: "Content-Type must be application/json",
-		},
-		{
-			name: "wrong content type", contentType: "text/plain",
-			body:       `{"operation":"add","a":10,"b":5}`,
-			wantStatus: http.StatusUnsupportedMediaType, wantError: "Content-Type must be application/json",
-		},
-		{
-			name: "form content type", contentType: "application/x-www-form-urlencoded",
-			body:       `operation=add&a=10&b=5`,
-			wantStatus: http.StatusUnsupportedMediaType, wantError: "Content-Type must be application/json",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			rec := doCalculate(t, tt.contentType, tt.body)
-
-			if rec.Code != tt.wantStatus {
-				t.Fatalf("status = %d, want %d; body = %s", rec.Code, tt.wantStatus, rec.Body)
-			}
-			assertJSONContentType(t, rec)
-
-			var resp errorResponse
-			if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-				t.Fatalf("decode error response: %v", err)
-			}
-			if resp.Error != tt.wantError {
-				t.Errorf("error = %q, want %q", resp.Error, tt.wantError)
-			}
-		})
-	}
+	})
 }
 
-func TestCalculateAcceptsContentTypeParameters(t *testing.T) {
-	for _, ct := range []string{"application/json; charset=utf-8", "Application/JSON"} {
-		t.Run(ct, func(t *testing.T) {
-			rec := doCalculate(t, ct, `{"operation":"add","a":1,"b":2}`)
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusOK, rec.Body)
-			}
-		})
-	}
+func TestCalculateDivision(t *testing.T) {
+	runAPICases(t, []apiCase{
+		{name: "exact", body: `{"operation":"divide","a":10,"b":5}`, wantStatus: 200, wantBody: `{"result":2}`},
+		{name: "fractional", body: `{"operation":"divide","a":7,"b":2}`, wantStatus: 200, wantBody: `{"result":3.5}`},
+		{name: "mixed signs", body: `{"operation":"divide","a":-9,"b":3}`, wantStatus: 200, wantBody: `{"result":-3}`},
+		{name: "decimal", body: `{"operation":"divide","a":7.5,"b":2.5}`, wantStatus: 200, wantBody: `{"result":3}`},
+		{name: "zero dividend", body: `{"operation":"divide","a":0,"b":5}`, wantStatus: 200, wantBody: `{"result":0}`},
+	})
 }
 
-func TestCalculateRejectsOtherMethods(t *testing.T) {
-	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete, http.MethodPatch} {
+func TestCalculateDivisionByZero(t *testing.T) {
+	const want = `{"error":"division by zero"}`
+	runAPICases(t, []apiCase{
+		{name: "positive dividend", body: `{"operation":"divide","a":10,"b":0}`, wantStatus: 422, wantBody: want},
+		{name: "negative dividend", body: `{"operation":"divide","a":-10,"b":0}`, wantStatus: 422, wantBody: want},
+		{name: "zero dividend", body: `{"operation":"divide","a":0,"b":0}`, wantStatus: 422, wantBody: want},
+		{name: "decimal zero divisor", body: `{"operation":"divide","a":10,"b":0.0}`, wantStatus: 422, wantBody: want},
+		{name: "negative zero divisor", body: `{"operation":"divide","a":10,"b":-0}`, wantStatus: 422, wantBody: want},
+	})
+}
+
+func TestCalculateUnsupportedOperation(t *testing.T) {
+	unsupported := func(op string) string {
+		return `{"error":"unsupported operation \"` + op + `\": must be one of add, subtract, multiply, divide"}`
+	}
+	runAPICases(t, []apiCase{
+		{name: "unknown name", body: `{"operation":"modulo","a":10,"b":5}`, wantStatus: 400, wantBody: unsupported("modulo")},
+		{name: "advanced operation", body: `{"operation":"power","a":2,"b":3}`, wantStatus: 400, wantBody: unsupported("power")},
+		{name: "wrong case", body: `{"operation":"ADD","a":10,"b":5}`, wantStatus: 400, wantBody: unsupported("ADD")},
+		{name: "operator symbol", body: `{"operation":"+","a":10,"b":5}`, wantStatus: 400, wantBody: unsupported("+")},
+		{name: "surrounding spaces", body: `{"operation":" add ","a":10,"b":5}`, wantStatus: 400, wantBody: unsupported(" add ")},
+	})
+}
+
+func TestCalculateMalformedJSON(t *testing.T) {
+	const malformed = `{"error":"request body contains malformed JSON"}`
+	runAPICases(t, []apiCase{
+		{name: "truncated", body: `{"operation":"add","a":10`, wantStatus: 400, wantBody: malformed},
+		{name: "unquoted keys", body: `{operation: add}`, wantStatus: 400, wantBody: malformed},
+		{name: "trailing comma", body: `{"operation":"add","a":10,"b":5,}`, wantStatus: 400, wantBody: malformed},
+		{name: "single quotes", body: `{'operation':'add','a':10,'b':5}`, wantStatus: 400, wantBody: malformed},
+		{name: "not JSON", body: `operation=add&a=10&b=5`, wantStatus: 400, wantBody: malformed},
+		{
+			name: "empty body", body: ``,
+			wantStatus: 400, wantBody: `{"error":"request body must not be empty"}`,
+		},
+		{
+			name: "array instead of object", body: `[1,2]`,
+			wantStatus: 400, wantBody: `{"error":"request body must be a valid JSON object"}`,
+		},
+		{
+			name: "multiple objects", body: `{"operation":"add","a":1,"b":2}{"operation":"add","a":3,"b":4}`,
+			wantStatus: 400, wantBody: `{"error":"request body must contain a single JSON object"}`,
+		},
+		{
+			name: "trailing garbage", body: `{"operation":"add","a":1,"b":2}}`,
+			wantStatus: 400, wantBody: `{"error":"request body must contain a single JSON object"}`,
+		},
+	})
+}
+
+func TestCalculateMissingFields(t *testing.T) {
+	const (
+		missingOperation = `{"error":"field \"operation\" is required"}`
+		missingA         = `{"error":"field \"a\" is required"}`
+		missingB         = `{"error":"field \"b\" is required"}`
+	)
+	runAPICases(t, []apiCase{
+		{name: "operation", body: `{"a":10,"b":5}`, wantStatus: 400, wantBody: missingOperation},
+		{name: "empty operation", body: `{"operation":"","a":10,"b":5}`, wantStatus: 400, wantBody: missingOperation},
+		{name: "null operation", body: `{"operation":null,"a":10,"b":5}`, wantStatus: 400, wantBody: missingOperation},
+		{name: "a", body: `{"operation":"add","b":5}`, wantStatus: 400, wantBody: missingA},
+		{name: "null a", body: `{"operation":"add","a":null,"b":5}`, wantStatus: 400, wantBody: missingA},
+		{name: "b", body: `{"operation":"add","a":10}`, wantStatus: 400, wantBody: missingB},
+		{name: "null b", body: `{"operation":"add","a":10,"b":null}`, wantStatus: 400, wantBody: missingB},
+		{name: "a and b", body: `{"operation":"add"}`, wantStatus: 400, wantBody: missingA},
+		{name: "all fields", body: `{}`, wantStatus: 400, wantBody: missingOperation},
+	})
+}
+
+func TestCalculateInvalidFields(t *testing.T) {
+	runAPICases(t, []apiCase{
+		{
+			name: "string operand", body: `{"operation":"add","a":"10","b":5}`,
+			wantStatus: 400, wantBody: `{"error":"field \"a\" has an invalid type"}`,
+		},
+		{
+			name: "boolean operand", body: `{"operation":"add","a":10,"b":true}`,
+			wantStatus: 400, wantBody: `{"error":"field \"b\" has an invalid type"}`,
+		},
+		{
+			name: "numeric operation", body: `{"operation":1,"a":10,"b":5}`,
+			wantStatus: 400, wantBody: `{"error":"field \"operation\" has an invalid type"}`,
+		},
+		{
+			name: "operand outside float64 range", body: `{"operation":"add","a":1e400,"b":5}`,
+			wantStatus: 400, wantBody: `{"error":"field \"a\" has an invalid type"}`,
+		},
+		{
+			name: "unknown field", body: `{"operation":"add","a":10,"b":5,"c":1}`,
+			wantStatus: 400, wantBody: `{"error":"request body contains unknown field \"c\""}`,
+		},
+		{
+			name:       "body too large",
+			body:       `{"operation":"add","a":10,"b":5,"pad":"` + strings.Repeat("x", 1024) + `"}`,
+			wantStatus: 413, wantBody: `{"error":"request body must not exceed 1024 bytes"}`,
+		},
+	})
+}
+
+func TestCalculateContentType(t *testing.T) {
+	const unsupported = `{"error":"Content-Type must be application/json"}`
+	const valid = `{"operation":"add","a":1,"b":2}`
+	runAPICases(t, []apiCase{
+		{name: "with charset", contentType: "application/json; charset=utf-8", body: valid, wantStatus: 200, wantBody: `{"result":3}`},
+		{name: "mixed case", contentType: "Application/JSON", body: valid, wantStatus: 200, wantBody: `{"result":3}`},
+		{name: "missing", contentType: "-", body: valid, wantStatus: 415, wantBody: unsupported},
+		{name: "text/plain", contentType: "text/plain", body: valid, wantStatus: 415, wantBody: unsupported},
+		{name: "form", contentType: "application/x-www-form-urlencoded", body: valid, wantStatus: 415, wantBody: unsupported},
+	})
+}
+
+func TestCalculateIncorrectMethod(t *testing.T) {
+	const want = `{"error":"method not allowed"}`
+	ts := newTestServer(t)
+	for _, method := range []string{
+		http.MethodGet, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions,
+	} {
 		t.Run(method, func(t *testing.T) {
-			req := httptest.NewRequest(method, calculatePath, nil)
-			rec := httptest.NewRecorder()
+			res := send(t, ts, method, calculatePath, jsonType, `{"operation":"add","a":1,"b":2}`)
 
-			NewHandler().ServeHTTP(rec, req)
-
-			if rec.Code != http.StatusMethodNotAllowed {
-				t.Fatalf("status = %d, want %d", rec.Code, http.StatusMethodNotAllowed)
+			if res.status != http.StatusMethodNotAllowed {
+				t.Errorf("status = %d, want %d", res.status, http.StatusMethodNotAllowed)
 			}
-			if got := rec.Header().Get("Allow"); got != "POST" {
-				t.Errorf("Allow = %q, want %q", got, "POST")
+			if got := res.header.Get("Allow"); got != http.MethodPost {
+				t.Errorf("Allow = %q, want %q", got, http.MethodPost)
 			}
+			assertJSON(t, res, want)
 		})
 	}
 }
 
-func TestCalculateUnversionedPathNotFound(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/calculate", strings.NewReader(`{}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	NewHandler().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+func TestCalculateRequiresVersionedPath(t *testing.T) {
+	ts := newTestServer(t)
+	for _, path := range []string{"/calculate", "/api/calculate", "/api/v2/calculate"} {
+		t.Run(path, func(t *testing.T) {
+			res := send(t, ts, http.MethodPost, path, jsonType, `{"operation":"add","a":1,"b":2}`)
+			if res.status != http.StatusNotFound {
+				t.Errorf("status = %d, want %d", res.status, http.StatusNotFound)
+			}
+		})
 	}
 }
