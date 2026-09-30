@@ -15,6 +15,8 @@ func NewHandler() http.Handler {
 	// Method-less pattern: matches every other method on the same path, since
 	// the POST pattern above is more specific.
 	mux.HandleFunc("/api/v1/calculate", methodNotAllowed(http.MethodPost))
+	// Any other path under /api/ gets a JSON 404, keeping API errors uniform.
+	mux.HandleFunc("/api/", notFound)
 	return mux
 }
 
@@ -24,6 +26,10 @@ type healthResponse struct {
 
 func handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, healthResponse{Status: "ok"})
+}
+
+func notFound(w http.ResponseWriter, _ *http.Request) {
+	writeError(w, http.StatusNotFound, "not found")
 }
 
 // methodNotAllowed returns a handler that responds with a JSON 405 error and

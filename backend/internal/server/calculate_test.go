@@ -189,6 +189,8 @@ func TestCalculateMalformedJSON(t *testing.T) {
 	const malformed = `{"error":"request body contains malformed JSON"}`
 	runAPICases(t, []apiCase{
 		{name: "truncated", body: `{"operation":"add","a":10`, wantStatus: 400, wantBody: malformed},
+		{name: "truncated after value", body: `{"operation":"add","a":10,"b":5`, wantStatus: 400, wantBody: malformed},
+		{name: "mismatched bracket", body: `{"operation":"add","a":10,"b":5]`, wantStatus: 400, wantBody: malformed},
 		{name: "unquoted keys", body: `{operation: add}`, wantStatus: 400, wantBody: malformed},
 		{name: "trailing comma", body: `{"operation":"add","a":10,"b":5,}`, wantStatus: 400, wantBody: malformed},
 		{name: "single quotes", body: `{'operation':'add','a':10,'b':5}`, wantStatus: 400, wantBody: malformed},
@@ -231,32 +233,152 @@ func TestCalculateMissingFields(t *testing.T) {
 	})
 }
 
-func TestCalculateInvalidFields(t *testing.T) {
+func TestCalculateFieldTypes(t *testing.T) {
 	runAPICases(t, []apiCase{
 		{
 			name: "string operand", body: `{"operation":"add","a":"10","b":5}`,
-			wantStatus: 400, wantBody: `{"error":"field \"a\" has an invalid type"}`,
+			wantStatus: 400, wantBody: `{"error":"field \"a\" must be a number"}`,
 		},
 		{
 			name: "boolean operand", body: `{"operation":"add","a":10,"b":true}`,
-			wantStatus: 400, wantBody: `{"error":"field \"b\" has an invalid type"}`,
+			wantStatus: 400, wantBody: `{"error":"field \"b\" must be a number"}`,
+		},
+		{
+			name: "object operand", body: `{"operation":"add","a":{},"b":5}`,
+			wantStatus: 400, wantBody: `{"error":"field \"a\" must be a number"}`,
+		},
+		{
+			name: "array operand", body: `{"operation":"add","a":10,"b":[5]}`,
+			wantStatus: 400, wantBody: `{"error":"field \"b\" must be a number"}`,
 		},
 		{
 			name: "numeric operation", body: `{"operation":1,"a":10,"b":5}`,
-			wantStatus: 400, wantBody: `{"error":"field \"operation\" has an invalid type"}`,
+			wantStatus: 400, wantBody: `{"error":"field \"operation\" must be a string"}`,
 		},
 		{
-			name: "operand outside float64 range", body: `{"operation":"add","a":1e400,"b":5}`,
-			wantStatus: 400, wantBody: `{"error":"field \"a\" has an invalid type"}`,
+			name: "array operation", body: `{"operation":["add"],"a":10,"b":5}`,
+			wantStatus: 400, wantBody: `{"error":"field \"operation\" must be a string"}`,
 		},
+		{
+			name: "operand above float64 range", body: `{"operation":"add","a":1e400,"b":5}`,
+			wantStatus: 400, wantBody: `{"error":"field \"a\" is out of range"}`,
+		},
+		{
+			name: "operand below float64 range", body: `{"operation":"add","a":1,"b":-1e400}`,
+			wantStatus: 400, wantBody: `{"error":"field \"b\" is out of range"}`,
+		},
+	})
+}
+
+func TestCalculateUnknownAndDuplicateFields(t *testing.T) {
+	runAPICases(t, []apiCase{
 		{
 			name: "unknown field", body: `{"operation":"add","a":10,"b":5,"c":1}`,
 			wantStatus: 400, wantBody: `{"error":"request body contains unknown field \"c\""}`,
 		},
 		{
+			name: "first unknown field is reported", body: `{"x":1,"operation":"add","a":10,"b":5,"y":2}`,
+			wantStatus: 400, wantBody: `{"error":"request body contains unknown field \"x\""}`,
+		},
+		{
+			name: "uppercase field names", body: `{"OPERATION":"add","A":10,"B":5}`,
+			wantStatus: 400, wantBody: `{"error":"request body contains unknown field \"OPERATION\""}`,
+		},
+		{
+			name: "mixed-case field name", body: `{"operation":"add","a":10,"B":5}`,
+			wantStatus: 400, wantBody: `{"error":"request body contains unknown field \"B\""}`,
+		},
+		{
+			name: "duplicate operation", body: `{"operation":"add","operation":"divide","a":1,"b":0}`,
+			wantStatus: 400, wantBody: `{"error":"request body contains duplicate field \"operation\""}`,
+		},
+		{
+			name: "duplicate operand", body: `{"operation":"add","a":1,"a":2,"b":3}`,
+			wantStatus: 400, wantBody: `{"error":"request body contains duplicate field \"a\""}`,
+		},
+		{
+			name: "duplicate null operand", body: `{"operation":"add","a":null,"a":1,"b":3}`,
+			wantStatus: 400, wantBody: `{"error":"request body contains duplicate field \"a\""}`,
+		},
+	})
+}
+
+func TestCalculateBodyShape(t *testing.T) {
+	const notObject = `{"error":"request body must be a valid JSON object"}`
+	runAPICases(t, []apiCase{
+		{name: "null", body: `null`, wantStatus: 400, wantBody: notObject},
+		{name: "number", body: `42`, wantStatus: 400, wantBody: notObject},
+		{name: "string", body: `"add"`, wantStatus: 400, wantBody: notObject},
+		{name: "boolean", body: `true`, wantStatus: 400, wantBody: notObject},
+		{name: "array", body: `[{"operation":"add","a":1,"b":2}]`, wantStatus: 400, wantBody: notObject},
+		{
+			name: "whitespace only", body: "  \n\t ",
+			wantStatus: 400, wantBody: `{"error":"request body must not be empty"}`,
+		},
+		{
 			name:       "body too large",
 			body:       `{"operation":"add","a":10,"b":5,"pad":"` + strings.Repeat("x", 1024) + `"}`,
 			wantStatus: 413, wantBody: `{"error":"request body must not exceed 1024 bytes"}`,
+		},
+		{
+			name:       "trailing data too large",
+			body:       `{"operation":"add","a":10,"b":5}` + strings.Repeat(" ", 1024) + `{}`,
+			wantStatus: 413, wantBody: `{"error":"request body must not exceed 1024 bytes"}`,
+		},
+	})
+}
+
+// TestCalculateValidationOrder pins down which error wins when a request has
+// several problems, so clients always get the same, documented error.
+func TestCalculateValidationOrder(t *testing.T) {
+	runAPICases(t, []apiCase{
+		{
+			name:        "content type before body",
+			contentType: "text/plain", body: `{bad json`,
+			wantStatus: 415, wantBody: `{"error":"Content-Type must be application/json"}`,
+		},
+		{
+			name:       "size before unknown field",
+			body:       `{"c":"` + strings.Repeat("x", 1024) + `"}`,
+			wantStatus: 413, wantBody: `{"error":"request body must not exceed 1024 bytes"}`,
+		},
+		{
+			name:       "early syntax error in oversized body",
+			body:       `{bad` + strings.Repeat(" ", 2048),
+			wantStatus: 400, wantBody: `{"error":"request body contains malformed JSON"}`,
+		},
+		{
+			name: "malformed JSON before unknown field", body: `{"c":1,"operation":`,
+			wantStatus: 400, wantBody: `{"error":"request body contains malformed JSON"}`,
+		},
+		{
+			name: "single object before unknown field", body: `{"c":1}{}`,
+			wantStatus: 400, wantBody: `{"error":"request body must contain a single JSON object"}`,
+		},
+		{
+			name: "unknown field before missing fields", body: `{"c":1}`,
+			wantStatus: 400, wantBody: `{"error":"request body contains unknown field \"c\""}`,
+		},
+		{
+			name: "unknown field before unsupported operation", body: `{"operation":"pow","a":1,"b":2,"c":3}`,
+			wantStatus: 400, wantBody: `{"error":"request body contains unknown field \"c\""}`,
+		},
+		{
+			name: "unsupported operation before missing operands", body: `{"operation":"pow"}`,
+			wantStatus: 400,
+			wantBody:   `{"error":"unsupported operation \"pow\": must be one of add, subtract, multiply, divide"}`,
+		},
+		{
+			name: "operation type before operand type", body: `{"operation":1,"a":"x","b":2}`,
+			wantStatus: 400, wantBody: `{"error":"field \"operation\" must be a string"}`,
+		},
+		{
+			name: "a before b", body: `{"operation":"add","a":"x"}`,
+			wantStatus: 400, wantBody: `{"error":"field \"a\" must be a number"}`,
+		},
+		{
+			name: "validation before division by zero", body: `{"operation":"divide","a":"x","b":0}`,
+			wantStatus: 400, wantBody: `{"error":"field \"a\" must be a number"}`,
 		},
 	})
 }
@@ -301,6 +423,19 @@ func TestCalculateRequiresVersionedPath(t *testing.T) {
 			if res.status != http.StatusNotFound {
 				t.Errorf("status = %d, want %d", res.status, http.StatusNotFound)
 			}
+		})
+	}
+}
+
+func TestAPIUnknownPathNotFound(t *testing.T) {
+	ts := newTestServer(t)
+	for _, path := range []string{"/api/", "/api/v1/", "/api/v1/nope", "/api/v1/calculate/", "/api/v2/calculate"} {
+		t.Run(path, func(t *testing.T) {
+			res := send(t, ts, http.MethodPost, path, jsonType, `{"operation":"add","a":1,"b":2}`)
+			if res.status != http.StatusNotFound {
+				t.Errorf("status = %d, want %d", res.status, http.StatusNotFound)
+			}
+			assertJSON(t, res, `{"error":"not found"}`)
 		})
 	}
 }
