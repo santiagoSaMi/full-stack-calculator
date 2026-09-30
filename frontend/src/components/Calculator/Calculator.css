@@ -1,0 +1,11 @@
+.calculator {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 100%;
+  max-width: 20rem;
+  padding: 1rem;
+  border: 1px solid var(--key-border);
+  border-radius: 0.75rem;
+  background: var(--surface);
+}

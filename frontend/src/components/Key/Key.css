@@ -1,0 +1,49 @@
+.key {
+  min-height: 3.5rem;
+  border: 1px solid var(--key-border);
+  border-radius: 0.5rem;
+  background: var(--key-bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 1.25rem;
+  cursor: pointer;
+}
+
+.key:hover {
+  filter: brightness(0.95);
+}
+
+.key:active {
+  filter: brightness(0.9);
+}
+
+.key:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.key--function {
+  background: var(--key-function-bg);
+}
+
+.key--operation {
+  background: var(--key-operation-bg);
+  color: var(--key-operation-text);
+}
+
+.key--operation[aria-pressed='true'] {
+  background: var(--key-operation-text);
+  color: var(--key-operation-bg);
+}
+
+.key--col-span-2 {
+  grid-column: span 2;
+}
+
+.key--col-span-3 {
+  grid-column: span 3;
+}
+
+.key--row-span-2 {
+  grid-row: span 2;
+}

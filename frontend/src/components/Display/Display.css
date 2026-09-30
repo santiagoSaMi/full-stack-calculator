@@ -1,0 +1,23 @@
+.display {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.25rem;
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  background: var(--display-bg);
+  font-variant-numeric: tabular-nums;
+}
+
+.display__expression {
+  min-height: 1.5rem;
+  color: var(--text-muted);
+}
+
+.display__value {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-align: right;
+  font-size: 2rem;
+  line-height: 1.2;
+}
