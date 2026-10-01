@@ -1,52 +1,109 @@
 .key {
-  min-height: 3.5rem;
+  /* Each variant overrides these; the states below only read them. */
+  --key-bg: var(--digit-bg);
+  --key-bg-hover: var(--digit-bg-hover);
+  --key-bg-active: var(--digit-bg-active);
+  --key-text: var(--text);
+
+  display: grid;
+  place-items: center;
+  /* At least 52px tall everywhere: comfortably above the 44–48px touch minimum. */
+  min-height: clamp(3.25rem, 15vw, 3.75rem);
+  padding: 0;
   border: 1px solid var(--key-border);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   background: var(--key-bg);
-  color: var(--text);
+  box-shadow: var(--key-shadow);
+  color: var(--key-text);
   font: inherit;
   font-size: 1.25rem;
+  font-weight: 500;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
   cursor: pointer;
+  user-select: none;
+  /* No double-tap zoom delay and no grey flash on touch devices. */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    transform 80ms ease;
 }
 
-.key:hover:not(:disabled) {
-  filter: brightness(0.95);
+/* Hover only where a pointer can hover, so it never sticks after a tap. */
+@media (hover: hover) {
+  .key:hover:not(:disabled) {
+    background: var(--key-bg-hover);
+  }
 }
 
 .key:active:not(:disabled) {
-  filter: brightness(0.9);
+  background: var(--key-bg-active);
+  box-shadow: none;
+  transform: scale(0.96);
 }
 
 .key:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 3px solid var(--focus);
   outline-offset: 2px;
 }
 
 .key:disabled {
-  opacity: 0.5;
+  box-shadow: none;
+  opacity: 0.45;
   cursor: not-allowed;
 }
 
 .key--function {
-  background: var(--key-function-bg);
+  --key-bg: var(--function-bg);
+  --key-bg-hover: var(--function-bg-hover);
+  --key-bg-active: var(--function-bg-active);
 }
 
 .key--operation {
-  background: var(--key-operation-bg);
-  color: var(--key-operation-text);
+  --key-bg: var(--operation-bg);
+  --key-bg-hover: var(--operation-bg-hover);
+  --key-bg-active: var(--operation-bg-active);
+  --key-text: var(--operation-text);
+
+  border-color: transparent;
+  font-size: 1.5rem;
 }
 
+/* The selected operation: inverted colours plus a ring, so it does not rely on hue alone. */
 .key--operation[aria-pressed='true'] {
-  background: var(--key-operation-text);
-  color: var(--key-operation-bg);
+  --key-bg: var(--accent);
+  --key-bg-hover: var(--accent-hover);
+  --key-bg-active: var(--accent-active);
+  --key-text: var(--accent-text);
+
+  box-shadow:
+    0 0 0 2px var(--surface),
+    0 0 0 4px var(--accent);
 }
 
 .key--submit {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--accent-text);
+  --key-bg: var(--accent);
+  --key-bg-hover: var(--accent-hover);
+  --key-bg-active: var(--accent-active);
+  --key-text: var(--accent-text);
+
+  border-color: transparent;
+  font-size: 1.5rem;
 }
 
 .key--col-span-2 {
   grid-column: span 2;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .key {
+    transition: none;
+  }
+
+  .key:active:not(:disabled) {
+    transform: none;
+  }
 }

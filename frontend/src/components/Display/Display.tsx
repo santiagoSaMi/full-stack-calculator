@@ -11,6 +11,14 @@ export interface DisplayProps {
   busy?: boolean
 }
 
+/** Font-size step for the value, so longer numbers still fit on one line. */
+function valueSize(value: string): 'lg' | 'md' | 'sm' | 'xs' {
+  if (value.length <= 9) return 'lg'
+  if (value.length <= 13) return 'md'
+  if (value.length <= 18) return 'sm'
+  return 'xs'
+}
+
 export function Display({ expression, value, error = null, busy = false }: DisplayProps) {
   return (
     <div className="display" aria-busy={busy}>
@@ -28,7 +36,7 @@ export function Display({ expression, value, error = null, busy = false }: Displ
           </span>
         )}
       </div>
-      <output className="display__value" aria-live="polite" aria-label="Value">
+      <output className="display__value" data-size={valueSize(value)} aria-live="polite" aria-label="Value">
         {value}
       </output>
     </div>
