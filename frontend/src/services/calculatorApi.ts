@@ -4,25 +4,39 @@ const CALCULATE_PATH = '/api/v1/calculate'
 
 /**
  * Why a call to the calculator API failed:
- * - `network`: the request never got a response (offline, server down, CORS,
- *   timeout).
+ * - `network`: the request never got a response (offline, server down, CORS).
+ * - `timeout`: the request was cancelled by a timeout signal.
  * - `http`: the server answered with a non-2xx status.
  * - `invalid_response`: the server answered 2xx with a body that is not a
  *   valid calculate response.
  */
-export type CalculatorApiErrorKind = 'network' | 'http' | 'invalid_response'
+export type CalculatorApiErrorKind = 'network' | 'timeout' | 'http' | 'invalid_response'
 
-/** Error thrown for every failed call to the calculator API. */
+export interface CalculatorApiErrorDetails {
+  /** HTTP status of the response, if there was one. */
+  status?: number
+  /** The `error` text of the API's error body, if it sent a valid one. */
+  apiMessage?: string
+  cause?: unknown
+}
+
+/**
+ * Error thrown for every failed call to the calculator API. It describes the
+ * failure in technical terms; its message is for logs, not for end users.
+ */
 export class CalculatorApiError extends Error {
   readonly kind: CalculatorApiErrorKind
   /** HTTP status of the response, or null if there was none. */
   readonly status: number | null
+  /** The `error` text from the API's error body, or null if there was none. */
+  readonly apiMessage: string | null
 
-  constructor(kind: CalculatorApiErrorKind, message: string, status: number | null, cause?: unknown) {
-    super(message, { cause })
+  constructor(kind: CalculatorApiErrorKind, message: string, details: CalculatorApiErrorDetails = {}) {
+    super(message, { cause: details.cause })
     this.name = 'CalculatorApiError'
     this.kind = kind
-    this.status = status
+    this.status = details.status ?? null
+    this.apiMessage = details.apiMessage ?? null
   }
 }
 
@@ -33,8 +47,7 @@ export interface CalculateOptions {
 
 /**
  * Sends a calculation to POST /api/v1/calculate and returns the parsed
- * response. Rejects with a CalculatorApiError whose message is suitable for
- * display.
+ * response. Rejects with a CalculatorApiError.
  */
 export async function calculate(
   request: CalculateRequest,
@@ -49,35 +62,29 @@ export async function calculate(
       signal: options.signal,
     })
   } catch (error) {
-    if (isAbortError(error)) throw error
-    throw new CalculatorApiError('network', 'Could not reach the calculator service', null, error)
+    if (isDomException(error, 'AbortError')) throw error
+    if (isDomException(error, 'TimeoutError')) {
+      throw new CalculatorApiError('timeout', 'Request timed out', { cause: error })
+    }
+    throw new CalculatorApiError('network', 'Network request failed', { cause: error })
   }
 
+  const { status } = response
   const body = await readJson(response)
 
   if (!response.ok) {
-    throw new CalculatorApiError('http', httpErrorMessage(response.status, body), response.status)
+    const apiMessage = isApiErrorResponse(body) ? body.error : undefined
+    throw new CalculatorApiError('http', apiMessage ?? `Request failed with status ${status}`, {
+      status,
+      apiMessage,
+    })
   }
   if (!isCalculateResponse(body)) {
-    throw new CalculatorApiError(
-      'invalid_response',
-      'Received an invalid response from the calculator service',
-      response.status,
-    )
+    throw new CalculatorApiError('invalid_response', 'Response body is not a valid calculate response', {
+      status,
+    })
   }
   return { result: body.result }
-}
-
-const UNAVAILABLE_MESSAGE = 'The calculator service is unavailable'
-
-/** Statuses a proxy or gateway returns when it cannot get an answer from the backend. */
-const GATEWAY_STATUSES = new Set([502, 503, 504])
-
-/** Picks the message for a non-2xx response: the API's own, if it sent one. */
-function httpErrorMessage(status: number, body: unknown): string {
-  if (isApiErrorResponse(body)) return body.error
-  if (GATEWAY_STATUSES.has(status)) return UNAVAILABLE_MESSAGE
-  return `Request failed with status ${status}`
 }
 
 /**
@@ -109,6 +116,6 @@ function isApiErrorResponse(value: unknown): value is ApiErrorResponse {
   return isObject(value) && typeof value.error === 'string' && value.error !== ''
 }
 
-function isAbortError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === 'AbortError'
+function isDomException(error: unknown, name: string): boolean {
+  return error instanceof DOMException && error.name === name
 }

@@ -113,7 +113,7 @@ describe('successful response', () => {
 
     expect(error.kind).toBe('invalid_response')
     expect(error.status).toBe(200)
-    expect(error.message).toBe('Received an invalid response from the calculator service')
+    expect(error.apiMessage).toBeNull()
   })
 })
 
@@ -124,14 +124,15 @@ describe('non-2xx response', () => {
     [415, 'Content-Type must be application/json'],
     [422, 'division by zero'],
     [500, 'internal server error'],
-  ])('rejects a %i with the API error message', async (status, message) => {
-    fetchMock.mockResolvedValue(jsonResponse(status, { error: message }))
+  ])('rejects a %i and exposes the API error text', async (status, apiMessage) => {
+    fetchMock.mockResolvedValue(jsonResponse(status, { error: apiMessage }))
 
     const error = await calculateError()
 
     expect(error.kind).toBe('http')
     expect(error.status).toBe(status)
-    expect(error.message).toBe(message)
+    expect(error.apiMessage).toBe(apiMessage)
+    expect(error.message).toBe(apiMessage)
   })
 
   it.each([
@@ -143,30 +144,15 @@ describe('non-2xx response', () => {
     ['a non-string error field', '{"error":42}'],
     ['an empty error field', '{"error":""}'],
     ['a success body', '{"result":15}'],
-  ])('falls back to a generic message for %s', async (_name, body) => {
-    fetchMock.mockResolvedValue(new Response(body, { status: 404 }))
+  ])('has no API error text for %s', async (_name, body) => {
+    fetchMock.mockResolvedValue(new Response(body, { status: 502 }))
 
     const error = await calculateError()
 
     expect(error.kind).toBe('http')
-    expect(error.status).toBe(404)
-    expect(error.message).toBe('Request failed with status 404')
-  })
-
-  it.each([502, 503, 504])('reports a %i without an API error as the service being unavailable', async (status) => {
-    fetchMock.mockResolvedValue(new Response('', { status }))
-
-    const error = await calculateError()
-
-    expect(error.kind).toBe('http')
-    expect(error.status).toBe(status)
-    expect(error.message).toBe('The calculator service is unavailable')
-  })
-
-  it('prefers the API error message over the gateway fallback', async () => {
-    fetchMock.mockResolvedValue(jsonResponse(503, { error: 'service is restarting' }))
-
-    expect((await calculateError()).message).toBe('service is restarting')
+    expect(error.status).toBe(502)
+    expect(error.apiMessage).toBeNull()
+    expect(error.message).toBe('Request failed with status 502')
   })
 })
 
@@ -179,19 +165,19 @@ describe('transport failure', () => {
 
     expect(error.kind).toBe('network')
     expect(error.status).toBeNull()
-    expect(error.message).toBe('Could not reach the calculator service')
+    expect(error.apiMessage).toBeNull()
     expect(error.cause).toBe(cause)
   })
 
-  it('reports a timeout as a network error', async () => {
-    const timeout = new DOMException('The operation timed out.', 'TimeoutError')
-    fetchMock.mockRejectedValue(timeout)
+  it('rejects with a timeout error when the timeout signal fires', async () => {
+    const cause = new DOMException('The operation timed out.', 'TimeoutError')
+    fetchMock.mockRejectedValue(cause)
 
     const error = await calculateError()
 
-    expect(error.kind).toBe('network')
-    expect(error.message).toBe('Could not reach the calculator service')
-    expect(error.cause).toBe(timeout)
+    expect(error.kind).toBe('timeout')
+    expect(error.status).toBeNull()
+    expect(error.cause).toBe(cause)
   })
 
   it('rethrows an abort instead of wrapping it', async () => {
@@ -204,7 +190,7 @@ describe('transport failure', () => {
 
 describe('CalculatorApiError', () => {
   it('is an Error with a recognizable name', () => {
-    const error = new CalculatorApiError('http', 'division by zero', 422)
+    const error = new CalculatorApiError('http', 'division by zero', { status: 422, apiMessage: 'division by zero' })
 
     expect(error).toBeInstanceOf(Error)
     expect(error.name).toBe('CalculatorApiError')

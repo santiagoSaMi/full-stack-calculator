@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { CalculationError } from '../calculator/errors.ts'
 import { apiCalculationService } from './apiCalculationService.ts'
 import { calculate, CalculatorApiError } from './calculatorApi.ts'
 
@@ -12,6 +13,11 @@ const calculateMock = vi.mocked(calculate)
 afterEach(() => {
   calculateMock.mockReset()
 })
+
+/** Runs the service and returns the error it rejects with. */
+async function serviceError(): Promise<unknown> {
+  return apiCalculationService({ operation: 'divide', a: 1, b: 0 }).catch((e: unknown) => e)
+}
 
 describe('apiCalculationService', () => {
   it('sends the request to the API client and returns the result', async () => {
@@ -31,10 +37,43 @@ describe('apiCalculationService', () => {
     expect(calculateMock.mock.calls[0]![1]?.signal).toBeInstanceOf(AbortSignal)
   })
 
-  it('propagates API errors unchanged', async () => {
-    const error = new CalculatorApiError('http', 'division by zero', 422)
-    calculateMock.mockRejectedValue(error)
+  it.each([
+    [
+      'division by zero from the backend',
+      new CalculatorApiError('http', 'division by zero', { status: 422, apiMessage: 'division by zero' }),
+      'Cannot divide by zero.',
+    ],
+    [
+      'an unsupported operation',
+      new CalculatorApiError('http', 'unsupported operation "pow"', {
+        status: 400,
+        apiMessage: 'unsupported operation "pow": must be one of add, subtract, multiply, divide',
+      }),
+      'That operation is not supported.',
+    ],
+    [
+      'a network failure',
+      new CalculatorApiError('network', 'Network request failed'),
+      'Could not reach the calculator service. Check your connection.',
+    ],
+    [
+      'a timeout',
+      new CalculatorApiError('timeout', 'Request timed out'),
+      'The calculator service took too long to respond. Please try again.',
+    ],
+    [
+      'an unavailable backend',
+      new CalculatorApiError('http', 'Request failed with status 502', { status: 502 }),
+      'The calculator service is unavailable. Please try again later.',
+    ],
+    ['an unexpected error', new TypeError('x is undefined'), 'Something went wrong. Please try again.'],
+  ])('rejects with a user-facing CalculationError for %s', async (_name, cause, message) => {
+    calculateMock.mockRejectedValue(cause)
 
-    await expect(apiCalculationService({ operation: 'divide', a: 1, b: 0 })).rejects.toBe(error)
+    const error = await serviceError()
+
+    expect(error).toBeInstanceOf(CalculationError)
+    expect((error as CalculationError).message).toBe(message)
+    expect((error as CalculationError).cause).toBe(cause)
   })
 })

@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { VALIDATION_MESSAGES } from '../../calculator/calculatorReducer.ts'
+import { CalculationError } from '../../calculator/errors.ts'
 import type { CalculationRequest, CalculationService } from '../../calculator/types.ts'
-import { CalculatorApiError } from '../../services/calculatorApi.ts'
 import { Calculator } from './Calculator.tsx'
 
 afterEach(cleanup)
@@ -32,6 +33,7 @@ function press(...names: string[]) {
 
 const value = () => screen.getByLabelText('Value').textContent
 const expression = () => screen.queryByLabelText('Expression')?.textContent
+const alert = () => screen.queryByRole('alert')?.textContent ?? null
 const isLoading = () => screen.queryByText('Calculating…') !== null
 const key = (name: string) => screen.getByRole('button', { name })
 
@@ -122,67 +124,164 @@ describe('Calculator', () => {
     expect(service).toHaveBeenCalledOnce()
   })
 
-  it('enables Equals only when the calculation is complete', () => {
-    const { service } = deferredService()
-    render(<Calculator calculate={service} />)
+  describe('validation before submitting', () => {
+    it.each([
+      ['nothing is entered', [], VALIDATION_MESSAGES.missingOperation, '0'],
+      ['only the first operand is entered', ['6'], VALIDATION_MESSAGES.missingOperation, '6'],
+      ['the second operand is empty', ['6', 'Multiply'], VALIDATION_MESSAGES.missingSecondOperand, '6'],
+    ])('explains what is missing when %s', (_name, keys, message, shown) => {
+      const { service } = deferredService()
+      render(<Calculator calculate={service} />)
 
-    expect(key('Equals')).toHaveProperty('disabled', true)
-    press('6')
-    expect(key('Equals')).toHaveProperty('disabled', true)
-    press('Multiply')
-    expect(key('Equals')).toHaveProperty('disabled', true)
-    press('7')
-    expect(key('Equals')).toHaveProperty('disabled', false)
+      press(...keys, 'Equals')
+
+      expect(alert()).toBe(message)
+      expect(value()).toBe(shown)
+      expect(service).not.toHaveBeenCalled()
+      expect(isLoading()).toBe(false)
+    })
+
+    it('clears the message once the missing operand is typed, and then submits', () => {
+      const { service } = deferredService()
+      render(<Calculator calculate={service} />)
+
+      press('6', 'Multiply', 'Equals')
+      expect(alert()).toBe(VALIDATION_MESSAGES.missingSecondOperand)
+
+      press('7')
+      expect(alert()).toBeNull()
+
+      press('Equals')
+      expect(service).toHaveBeenCalledWith({ operation: 'multiply', a: 6, b: 7 })
+    })
+
+    it('asks for an operation when Equals is pressed again after a result', async () => {
+      const { service, resolve } = deferredService()
+      render(<Calculator calculate={service} />)
+
+      press('1', 'Add', '2', 'Equals')
+      await resolve(3)
+      press('Equals')
+
+      expect(alert()).toBe(VALIDATION_MESSAGES.missingOperation)
+      expect(value()).toBe('3')
+      expect(service).toHaveBeenCalledOnce()
+    })
+
+    it('does not send an operand that is not a finite number', async () => {
+      const { service, resolve } = deferredService()
+      render(<Calculator calculate={service} />)
+
+      // A huge result is shown as "1e+21"; negating it and typing more digits
+      // yields "-1e+21999", which is not a finite number.
+      press('1', 'Multiply', '1', 'Equals')
+      await resolve(1e21)
+      press('Toggle sign', '9', '9', '9', 'Add', '1', 'Equals')
+
+      expect(alert()).toBe(VALIDATION_MESSAGES.invalidNumber)
+      expect(service).toHaveBeenCalledOnce()
+    })
+
+    it('leaves division by zero for the backend to judge', () => {
+      const { service } = deferredService()
+      render(<Calculator calculate={service} />)
+
+      press('8', 'Divide', '0', 'Equals')
+
+      expect(alert()).toBeNull()
+      expect(service).toHaveBeenCalledWith({ operation: 'divide', a: 8, b: 0 })
+    })
   })
 
-  it('shows an API error to the user', async () => {
-    const { service, reject } = deferredService()
-    render(<Calculator calculate={service} />)
+  describe('when the calculation fails', () => {
+    it.each([
+      ['division by zero', 'Cannot divide by zero.'],
+      ['an unsupported operation', 'That operation is not supported.'],
+      ['a network failure', 'Could not reach the calculator service. Check your connection.'],
+      ['an unavailable backend', 'The calculator service is unavailable. Please try again later.'],
+    ])('shows the message for %s', async (_name, message) => {
+      const { service, reject } = deferredService()
+      render(<Calculator calculate={service} />)
 
-    press('8', 'Divide', '0', 'Equals')
-    await reject(new CalculatorApiError('http', 'division by zero', 422))
+      press('8', 'Divide', '0', 'Equals')
+      await reject(new CalculationError(message))
 
-    expect(screen.getByRole('alert').textContent).toBe('division by zero')
-    expect(isLoading()).toBe(false)
-    expect(key('Equals')).toHaveProperty('disabled', false)
-  })
+      expect(alert()).toBe(message)
+      expect(isLoading()).toBe(false)
+    })
 
-  it('shows a network failure to the user', async () => {
-    const { service, reject } = deferredService()
-    render(<Calculator calculate={service} />)
+    it.each([
+      ['a raw Error', new Error('connect ECONNREFUSED 127.0.0.1:8080')],
+      ['a TypeError', new TypeError("Cannot read properties of undefined (reading 'result')")],
+      ['a non-Error value', 'not an Error'],
+      ['a CalculationError without a message', new CalculationError('')],
+    ])('shows a generic message instead of %s', async (_name, error) => {
+      const { service, reject } = deferredService()
+      render(<Calculator calculate={service} />)
 
-    press('1', 'Add', '1', 'Equals')
-    await reject(new CalculatorApiError('network', 'Could not reach the calculator service', null))
+      press('1', 'Add', '1', 'Equals')
+      await reject(error)
 
-    expect(screen.getByRole('alert').textContent).toBe('Could not reach the calculator service')
-    expect(value()).toBe('1')
-  })
+      expect(alert()).toBe('Something went wrong. Please try again.')
+    })
 
-  it('shows a generic message when the failure has none', async () => {
-    const { service, reject } = deferredService()
-    render(<Calculator calculate={service} />)
+    it('keeps the entered numbers and re-enables the keys', async () => {
+      const { service, reject } = deferredService()
+      render(<Calculator calculate={service} />)
 
-    press('1', 'Add', '1', 'Equals')
-    await reject('not an Error')
+      press('8', 'Divide', '0', 'Equals')
+      await reject(new CalculationError('Cannot divide by zero.'))
 
-    expect(screen.getByRole('alert').textContent).toBe('Calculation failed')
-  })
+      expect(value()).toBe('0')
+      expect(key('Equals')).toHaveProperty('disabled', false)
+      expect(key('4')).toHaveProperty('disabled', false)
+    })
 
-  it('lets the user correct the input and retry after an error', async () => {
-    const { service, reject, resolve } = deferredService()
-    render(<Calculator calculate={service} />)
+    it('lets the user correct the input and retry', async () => {
+      const { service, reject, resolve } = deferredService()
+      render(<Calculator calculate={service} />)
 
-    press('8', 'Divide', '0', 'Equals')
-    await reject(new CalculatorApiError('http', 'division by zero', 422))
-    press('4')
+      press('8', 'Divide', '0', 'Equals')
+      await reject(new CalculationError('Cannot divide by zero.'))
+      press('4')
 
-    expect(screen.queryByRole('alert')).toBeNull()
+      expect(alert()).toBeNull()
 
-    press('Equals')
-    await resolve(2)
+      press('Equals')
+      await resolve(2)
 
-    expect(service).toHaveBeenLastCalledWith({ operation: 'divide', a: 8, b: 4 })
-    expect(value()).toBe('2')
+      expect(service).toHaveBeenLastCalledWith({ operation: 'divide', a: 8, b: 4 })
+      expect(value()).toBe('2')
+    })
+
+    it('lets the user retry unchanged after a network failure', async () => {
+      const { service, reject, resolve } = deferredService()
+      render(<Calculator calculate={service} />)
+
+      press('1', 'Add', '1', 'Equals')
+      await reject(new CalculationError('Could not reach the calculator service. Check your connection.'))
+      press('Equals')
+
+      expect(alert()).toBeNull()
+      expect(isLoading()).toBe(true)
+
+      await resolve(2)
+
+      expect(service).toHaveBeenCalledTimes(2)
+      expect(value()).toBe('2')
+    })
+
+    it('dismisses the error on Clear', async () => {
+      const { service, reject } = deferredService()
+      render(<Calculator calculate={service} />)
+
+      press('8', 'Divide', '0', 'Equals')
+      await reject(new CalculationError('Cannot divide by zero.'))
+      press('Clear')
+
+      expect(alert()).toBeNull()
+      expect(value()).toBe('0')
+    })
   })
 
   it('continues from the result into the next calculation', async () => {

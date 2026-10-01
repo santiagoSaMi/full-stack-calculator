@@ -23,7 +23,6 @@ export function Calculator({ calculate }: CalculatorProps) {
       />
       <Keypad
         activeOperation={calculator.activeOperation}
-        canSubmit={calculator.canSubmit}
         disabled={calculator.isPending}
         onDigit={calculator.inputDigit}
         onDecimal={calculator.inputDecimal}

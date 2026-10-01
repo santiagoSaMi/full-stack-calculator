@@ -6,6 +6,7 @@ import type {
   Digit,
   InputAction,
   Operation,
+  Validation,
 } from './types.ts'
 
 /** Maximum number of digits accepted in a single operand. */
@@ -15,8 +16,16 @@ export const initialState: CalculatorState = {
   firstOperand: null,
   operation: null,
   currentInput: '0',
+  inputIsResult: false,
   calculation: { status: 'idle' },
 }
+
+/** Messages for input that cannot be submitted yet. */
+export const VALIDATION_MESSAGES = {
+  missingOperation: 'Choose an operation first.',
+  missingSecondOperand: 'Enter a second number.',
+  invalidNumber: 'Enter a valid number.',
+} as const
 
 export function calculatorReducer(state: CalculatorState, action: CalculatorAction): CalculatorState {
   switch (action.type) {
@@ -38,6 +47,7 @@ export function calculatorReducer(state: CalculatorState, action: CalculatorActi
         firstOperand: null,
         operation: null,
         currentInput: formatNumber(action.result),
+        inputIsResult: true,
         calculation: { status: 'success', request: pending, result: action.result },
       }
     }
@@ -46,11 +56,12 @@ export function calculatorReducer(state: CalculatorState, action: CalculatorActi
       const pending = currentRequest(state, action.requestId)
       if (pending === null) return state
       // Operands are kept so the user can correct them and resubmit.
-      return {
-        ...state,
-        calculation: { status: 'error', request: pending, message: action.message },
-      }
+      return { ...state, calculation: { status: 'error', message: action.message } }
     }
+
+    case 'invalidate':
+      if (state.calculation.status === 'pending') return state
+      return { ...state, calculation: { status: 'error', message: action.message } }
 
     default:
       return reduceInput(state, action)
@@ -72,9 +83,9 @@ function reduceInput(state: CalculatorState, action: InputAction): CalculatorSta
   if (state.calculation.status === 'pending') return state
 
   // Any input dismisses the previous result or error.
-  const next: CalculatorState = { ...state, calculation: { status: 'idle' } }
+  const next: CalculatorState = { ...state, inputIsResult: false, calculation: { status: 'idle' } }
   // While a result is showing, typing starts a new number instead of editing it.
-  const input = state.calculation.status === 'success' ? '' : state.currentInput
+  const input = state.inputIsResult ? '' : state.currentInput
 
   switch (action.type) {
     case 'inputDigit':
@@ -138,21 +149,26 @@ export function formatNumber(value: number): string {
 }
 
 /**
- * Returns the calculation described by the current input, or null while it
- * is incomplete (no operation selected, or no second operand typed).
+ * Checks whether the current input describes a complete calculation. This is
+ * the single place that decides if the calculator can submit, and it checks
+ * only what the frontend alone can know: that the entry is complete and the
+ * operands are numbers. Arithmetic rules such as division by zero are left to
+ * the backend.
  */
-export function selectRequest(state: CalculatorState): CalculationRequest | null {
-  if (state.firstOperand === null || state.operation === null || state.currentInput === '') return null
-  return {
-    operation: state.operation,
-    a: Number(state.firstOperand),
-    b: Number(normalizeOperand(state.currentInput)),
+export function validateSubmission(state: CalculatorState): Validation {
+  if (state.firstOperand === null || state.operation === null) {
+    return { ok: false, message: VALIDATION_MESSAGES.missingOperation }
   }
-}
+  if (state.currentInput === '') {
+    return { ok: false, message: VALIDATION_MESSAGES.missingSecondOperand }
+  }
 
-/** Whether the current input can be submitted for calculation. */
-export function selectCanSubmit(state: CalculatorState): boolean {
-  return state.calculation.status !== 'pending' && selectRequest(state) !== null
+  const a = Number(state.firstOperand)
+  const b = Number(normalizeOperand(state.currentInput))
+  if (!Number.isFinite(a) || !Number.isFinite(b)) {
+    return { ok: false, message: VALIDATION_MESSAGES.invalidNumber }
+  }
+  return { ok: true, request: { operation: state.operation, a, b } }
 }
 
 /** Text for the display's secondary line, e.g. "12 +" or "12 + 3 =". */

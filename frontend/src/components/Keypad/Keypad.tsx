@@ -5,8 +5,6 @@ import './Keypad.css'
 
 export interface KeypadProps {
   activeOperation: Operation | null
-  /** Whether the equals key is enabled. */
-  canSubmit: boolean
   /** Disables every key except Clear, e.g. while a calculation is pending. */
   disabled?: boolean
   onDigit: (digit: Digit) => void
@@ -19,7 +17,6 @@ export interface KeypadProps {
 
 export function Keypad({
   activeOperation,
-  canSubmit,
   disabled = false,
   onDigit,
   onDecimal,
@@ -76,7 +73,7 @@ export function Keypad({
       <Key label="Decimal point" disabled={disabled} onPress={onDecimal}>
         .
       </Key>
-      <Key variant="submit" label="Equals" disabled={disabled || !canSubmit} onPress={onSubmit}>
+      <Key variant="submit" label="Equals" disabled={disabled} onPress={onSubmit}>
         =
       </Key>
     </div>

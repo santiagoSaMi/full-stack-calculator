@@ -60,7 +60,7 @@ Every error under `/api/` is returned as JSON with `Content-Type: application/js
 { "error": "division by zero" }
 ```
 
-The `error` string is meant for display and debugging; clients should branch on the HTTP status code.
+The `error` string describes the problem in technical terms. Clients should branch on the HTTP status code and choose their own wording for end users. The bundled frontend never shows this text directly: it translates each failure into a user-facing message in `frontend/src/services/calculationErrorMessages.ts`, using the status code and, for the few cases that deserve specific wording (`division by zero`, `result is out of range`, `field "<name>" is out of range`, `unsupported operation …`), the exact text below. Changing those texts therefore requires updating that file.
 
 Requests are validated in the order below, and only the **first** failing check is reported. Checks 3–7 run while the body is read, so whichever problem appears first in the body wins (e.g. an oversized body with a syntax error near the start is reported as malformed JSON). Checks 8 onward run only once the whole body has been read and is valid JSON.
 

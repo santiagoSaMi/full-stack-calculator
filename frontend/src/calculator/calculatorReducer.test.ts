@@ -4,14 +4,14 @@ import {
   formatNumber,
   initialState,
   MAX_DIGITS,
-  selectCanSubmit,
   selectDisplayValue,
   selectError,
   selectExpression,
   selectIsPending,
-  selectRequest,
+  validateSubmission,
+  VALIDATION_MESSAGES,
 } from './calculatorReducer.ts'
-import type { CalculatorAction, CalculatorState, Digit, Operation } from './types.ts'
+import type { CalculationRequest, CalculatorAction, CalculatorState, Digit, Operation } from './types.ts'
 
 const digit = (d: Digit): CalculatorAction => ({ type: 'inputDigit', digit: d })
 const op = (operation: Operation): CalculatorAction => ({ type: 'selectOperation', operation })
@@ -34,9 +34,21 @@ function run(...actions: CalculatorAction[]): CalculatorState {
   return apply(initialState, ...actions)
 }
 
+/** The request the current input would submit, or null if it is not valid. */
+function requestOf(state: CalculatorState): CalculationRequest | null {
+  const validation = validateSubmission(state)
+  return validation.ok ? validation.request : null
+}
+
+/** The validation message for the current input, or null if it is valid. */
+function validationMessage(state: CalculatorState): string | null {
+  const validation = validateSubmission(state)
+  return validation.ok ? null : validation.message
+}
+
 /** Submits the current input with the given request id. */
 function submit(state: CalculatorState, requestId = 1): CalculatorState {
-  const request = selectRequest(state)
+  const request = requestOf(state)
   if (request === null) throw new Error('state has no complete request')
   return calculatorReducer(state, { type: 'submit', requestId, request })
 }
@@ -47,6 +59,10 @@ function resolve(state: CalculatorState, result: number, requestId = 1): Calcula
 
 function reject(state: CalculatorState, message: string, requestId = 1): CalculatorState {
   return calculatorReducer(state, { type: 'reject', requestId, message })
+}
+
+function invalidate(state: CalculatorState, message: string): CalculatorState {
+  return calculatorReducer(state, { type: 'invalidate', message })
 }
 
 describe('entering an operand', () => {
@@ -132,38 +148,105 @@ describe('selecting an operation', () => {
   })
 })
 
-describe('building the request', () => {
+describe('validating the submission', () => {
   it.each([
-    ['only a first operand', run(...type('12'))],
-    ['no second operand', run(...type('12'), op('add'))],
-  ])('is not ready with %s', (_name, state) => {
-    expect(selectRequest(state)).toBeNull()
-    expect(selectCanSubmit(state)).toBe(false)
+    ['nothing entered', run(), VALIDATION_MESSAGES.missingOperation],
+    ['only a first operand', run(...type('12')), VALIDATION_MESSAGES.missingOperation],
+    ['no second operand', run(...type('12'), op('add')), VALIDATION_MESSAGES.missingSecondOperand],
+    [
+      'no second operand after switching the operation',
+      run(...type('12'), op('add'), op('divide')),
+      VALIDATION_MESSAGES.missingSecondOperand,
+    ],
+  ])('rejects %s', (_name, state, message) => {
+    expect(validateSubmission(state)).toEqual({ ok: false, message })
   })
 
-  it('is ready once both operands and an operation are entered', () => {
+  it('accepts both operands and an operation', () => {
     const state = run(...type('12'), op('add'), digit('3'))
 
-    expect(selectRequest(state)).toEqual({ operation: 'add', a: 12, b: 3 })
-    expect(selectCanSubmit(state)).toBe(true)
+    expect(validateSubmission(state)).toEqual({ ok: true, request: { operation: 'add', a: 12, b: 3 } })
   })
 
   it('converts decimal and negative operands to numbers', () => {
     const state = run(...type('-5.5'), op('divide'), ...type('-0.25'))
 
-    expect(selectRequest(state)).toEqual({ operation: 'divide', a: -5.5, b: -0.25 })
+    expect(requestOf(state)).toEqual({ operation: 'divide', a: -5.5, b: -0.25 })
   })
 
   it('ignores trailing decimal points', () => {
     const state = run(...type('5.'), op('add'), ...type('2.'))
 
-    expect(selectRequest(state)).toEqual({ operation: 'add', a: 5, b: 2 })
+    expect(requestOf(state)).toEqual({ operation: 'add', a: 5, b: 2 })
   })
 
-  it('allows a zero divisor so the backend decides the outcome', () => {
+  it('accepts zero operands', () => {
+    expect(requestOf(run(digit('0'), op('add'), digit('0')))).toEqual({ operation: 'add', a: 0, b: 0 })
+  })
+
+  it('does not judge division by zero, which is the backend\'s decision', () => {
     const state = run(digit('8'), op('divide'), digit('0'))
 
-    expect(selectRequest(state)).toEqual({ operation: 'divide', a: 8, b: 0 })
+    expect(validateSubmission(state)).toEqual({ ok: true, request: { operation: 'divide', a: 8, b: 0 } })
+  })
+
+  it.each([
+    ['first', { firstOperand: '1e+999', operation: 'add', currentInput: '1' }],
+    ['second', { firstOperand: '1', operation: 'add', currentInput: '-1e+999' }],
+    ['first (not a number)', { firstOperand: 'abc', operation: 'add', currentInput: '1' }],
+    ['second (not a number)', { firstOperand: '1', operation: 'add', currentInput: '1.2.3' }],
+  ] as const)('rejects a %s operand that is not a finite number', (_name, operands) => {
+    const state: CalculatorState = { ...initialState, ...operands }
+
+    expect(validationMessage(state)).toBe(VALIDATION_MESSAGES.invalidNumber)
+  })
+
+  it('rejects an operand made invalid by editing a very large result', () => {
+    // 1e21 is displayed as "1e+21"; negating it and typing more digits
+    // produces "-1e+21999", which overflows to -Infinity.
+    const result = resolve(submit(run(digit('1'), op('multiply'), digit('1'))), 1e21)
+    const edited = apply(result, sign, digit('9'), digit('9'), digit('9'), op('add'), digit('1'))
+
+    expect(edited.firstOperand).toBe('-1e+21999')
+    expect(validationMessage(edited)).toBe(VALIDATION_MESSAGES.invalidNumber)
+  })
+})
+
+describe('reporting invalid input', () => {
+  it('stores the validation message as the error', () => {
+    const state = invalidate(run(...type('12'), op('add')), VALIDATION_MESSAGES.missingSecondOperand)
+
+    expect(selectError(state)).toBe(VALIDATION_MESSAGES.missingSecondOperand)
+    expect(selectIsPending(state)).toBe(false)
+  })
+
+  it('keeps what was entered', () => {
+    const before = run(...type('12'), op('add'))
+    const state = invalidate(before, VALIDATION_MESSAGES.missingSecondOperand)
+
+    expect(state.firstOperand).toBe('12')
+    expect(state.operation).toBe('add')
+    expect(selectDisplayValue(state)).toBe('12')
+  })
+
+  it('dismisses the message on the next input', () => {
+    const state = apply(invalidate(run(...type('12'), op('add')), 'message'), digit('3'))
+
+    expect(selectError(state)).toBeNull()
+    expect(requestOf(state)).toEqual({ operation: 'add', a: 12, b: 3 })
+  })
+
+  it('still replaces a result when typing after an invalid submit', () => {
+    const done = resolve(submit(run(...type('12'), op('add'), digit('3'))), 15)
+    const state = apply(invalidate(done, VALIDATION_MESSAGES.missingOperation), digit('7'))
+
+    expect(selectDisplayValue(state)).toBe('7')
+  })
+
+  it('is ignored while a calculation is pending', () => {
+    const pending = submit(run(digit('6'), op('multiply'), digit('7')))
+
+    expect(invalidate(pending, 'message')).toBe(pending)
   })
 })
 
@@ -173,7 +256,6 @@ describe('while a calculation is pending', () => {
 
   it('is marked as pending and shows the full expression', () => {
     expect(selectIsPending(pending)).toBe(true)
-    expect(selectCanSubmit(pending)).toBe(false)
     expect(selectExpression(pending)).toBe('6 × 7 =')
   })
 
@@ -215,8 +297,8 @@ describe('after a successful calculation', () => {
     expect(selectDisplayValue(state)).toBe('5')
   })
 
-  it('cannot be resubmitted', () => {
-    expect(selectCanSubmit(done)).toBe(false)
+  it('needs a new operation before it can be submitted again', () => {
+    expect(validationMessage(done)).toBe(VALIDATION_MESSAGES.missingOperation)
   })
 
   it('starts a new number when a digit is typed', () => {
@@ -238,7 +320,7 @@ describe('after a successful calculation', () => {
     const state = apply(done, op('multiply'), digit('2'))
 
     expect(selectExpression(state)).toBe('15 ×')
-    expect(selectRequest(state)).toEqual({ operation: 'multiply', a: 15, b: 2 })
+    expect(requestOf(state)).toEqual({ operation: 'multiply', a: 15, b: 2 })
   })
 
   it('resets on clear', () => {
@@ -257,14 +339,14 @@ describe('after a failed calculation', () => {
   it('keeps the operands so the calculation can be corrected', () => {
     expect(selectExpression(failed)).toBe('8 ÷')
     expect(selectDisplayValue(failed)).toBe('0')
-    expect(selectCanSubmit(failed)).toBe(true)
+    expect(requestOf(failed)).toEqual({ operation: 'divide', a: 8, b: 0 })
   })
 
   it('dismisses the error on the next input', () => {
     const state = apply(failed, digit('4'))
 
     expect(selectError(state)).toBeNull()
-    expect(selectRequest(state)).toEqual({ operation: 'divide', a: 8, b: 4 })
+    expect(requestOf(state)).toEqual({ operation: 'divide', a: 8, b: 4 })
   })
 
   it('can be retried unchanged', () => {

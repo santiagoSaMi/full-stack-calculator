@@ -2,27 +2,23 @@ import { useCallback, useReducer, useRef } from 'react'
 import {
   calculatorReducer,
   initialState,
-  selectCanSubmit,
   selectDisplayValue,
   selectError,
   selectExpression,
   selectIsPending,
-  selectRequest,
+  validateSubmission,
 } from './calculatorReducer.ts'
+import { CalculationError, GENERIC_ERROR_MESSAGE } from './errors.ts'
 import type { CalculationService, Digit, Operation } from './types.ts'
-
-const FALLBACK_ERROR = 'Calculation failed'
 
 export interface UseCalculatorResult {
   expression: string
   displayValue: string
   activeOperation: Operation | null
-  /** Message of the last failed calculation, or null. */
+  /** User-facing message for the last failed or invalid calculation, or null. */
   error: string | null
   /** True while a submitted calculation is awaiting its result. */
   isPending: boolean
-  /** True when both operands and an operation are entered. */
-  canSubmit: boolean
   inputDigit: (digit: Digit) => void
   inputDecimal: () => void
   toggleSign: () => void
@@ -48,23 +44,25 @@ export function useCalculator(calculate: CalculationService): UseCalculatorResul
   )
   const clear = useCallback(() => dispatch({ type: 'clear' }), [])
 
-  const request = selectRequest(state)
-  const canSubmit = selectCanSubmit(state)
+  const isPending = selectIsPending(state)
 
   const submit = () => {
-    if (!canSubmit || request === null) return
+    if (isPending) return
+
+    const validation = validateSubmission(state)
+    if (!validation.ok) {
+      dispatch({ type: 'invalidate', message: validation.message })
+      return
+    }
 
     // The id lets the reducer discard a response that arrives after the
     // calculator was cleared or another calculation was submitted.
     const requestId = ++lastRequestId.current
-    dispatch({ type: 'submit', requestId, request })
+    dispatch({ type: 'submit', requestId, request: validation.request })
 
-    calculate(request).then(
+    calculate(validation.request).then(
       (result) => dispatch({ type: 'resolve', requestId, result }),
-      (error: unknown) => {
-        const message = error instanceof Error && error.message ? error.message : FALLBACK_ERROR
-        dispatch({ type: 'reject', requestId, message })
-      },
+      (error: unknown) => dispatch({ type: 'reject', requestId, message: toUserMessage(error) }),
     )
   }
 
@@ -73,8 +71,7 @@ export function useCalculator(calculate: CalculationService): UseCalculatorResul
     displayValue: selectDisplayValue(state),
     activeOperation: state.operation,
     error: selectError(state),
-    isPending: selectIsPending(state),
-    canSubmit,
+    isPending,
     inputDigit,
     inputDecimal,
     toggleSign,
@@ -82,4 +79,12 @@ export function useCalculator(calculate: CalculationService): UseCalculatorResul
     submit,
     clear,
   }
+}
+
+/**
+ * Only a CalculationError carries a message written for the user; anything
+ * else (a bug, an unexpected rejection) is reported generically.
+ */
+function toUserMessage(error: unknown): string {
+  return error instanceof CalculationError && error.message ? error.message : GENERIC_ERROR_MESSAGE
 }

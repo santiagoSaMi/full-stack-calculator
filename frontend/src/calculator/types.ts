@@ -11,9 +11,10 @@ export interface CalculationRequest {
 }
 
 /**
- * Performs a calculation and resolves with its result, or rejects with an
- * Error whose message can be shown to the user. This is the only boundary
- * through which the calculator obtains results.
+ * Performs a calculation and resolves with its result. To report a failure
+ * the user should read about, it rejects with a CalculationError; any other
+ * rejection is shown as a generic failure. This is the only boundary through
+ * which the calculator obtains results.
  */
 export type CalculationService = (request: CalculationRequest) => Promise<number>
 
@@ -22,7 +23,7 @@ export type CalculationState =
   | { status: 'idle' }
   | { status: 'pending'; requestId: number; request: CalculationRequest }
   | { status: 'success'; request: CalculationRequest; result: number }
-  | { status: 'error'; request: CalculationRequest; message: string }
+  | { status: 'error'; message: string }
 
 /** State of the calculator. Operands are kept as the strings typed. */
 export interface CalculatorState {
@@ -35,6 +36,8 @@ export interface CalculatorState {
    * After a successful calculation it holds the result.
    */
   currentInput: string
+  /** True while the input holds a result, so typing replaces it instead of editing it. */
+  inputIsResult: boolean
   calculation: CalculationState
 }
 
@@ -51,3 +54,8 @@ export type CalculatorAction =
   | { type: 'submit'; requestId: number; request: CalculationRequest }
   | { type: 'resolve'; requestId: number; result: number }
   | { type: 'reject'; requestId: number; message: string }
+  /** Reports that the current input cannot be submitted. */
+  | { type: 'invalidate'; message: string }
+
+/** Outcome of checking whether the current input can be submitted. */
+export type Validation = { ok: true; request: CalculationRequest } | { ok: false; message: string }
