@@ -18,7 +18,7 @@ A calculator with a React + TypeScript frontend and a Go backend. The frontend h
 - [Running tests](#running-tests)
 - [Generating coverage reports](#generating-coverage-reports)
 - [Testing strategy](#testing-strategy)
-- [Design decisions](#design-decisions)
+- [Design rationale](#design-rationale)
 - [Known limitations](#known-limitations)
 
 ## Overview
@@ -78,17 +78,7 @@ In development the browser only talks to the Vite dev server, which forwards `/a
 
 `App.tsx` connects the layers by passing the API-backed service to `<Calculator>`. The calculator state depends only on a function type, `(request) => Promise<number>`, not on the API client.
 
-### Why the backend performs the arithmetic
-
-The frontend never computes a result. It sends the operands and shows what the API returns.
-
-- **One source of truth.** The rules of the calculator (what division by zero returns, when a power has no real result, when a result is out of range) are defined once. Any other client of the API gets identical behaviour.
-- **No duplicated logic to drift apart.** Two implementations of the same arithmetic would have to be kept in step, and a mismatch would only show up as the UI and the API disagreeing.
-- **Clear responsibilities.** The frontend owns input and presentation; the backend owns the calculation. Each can be tested on its own.
-
-The frontend still does two things locally, neither of which is arithmetic on the result: it checks that the entry is complete and that the operands are finite numbers before sending them, and it formats the returned number for display (to 15 significant digits, so `0.30000000000000004` is shown as `0.3`).
-
-The cost is a network round trip per calculation, and no offline use. The loading state, request timeout and error messages exist to handle that. A test enforces the rule: it makes the mocked API answer `2 + 2` with `5` and checks that the display shows `5`.
+The reasoning behind this structure is in [Design rationale](#design-rationale).
 
 ## Repository structure
 
@@ -416,20 +406,87 @@ Principles followed:
 
 There is no automated end-to-end test that runs the real frontend against the real backend in a browser.
 
-## Design decisions
+## Design rationale
 
-- **The backend is the only place arithmetic happens.** See [Why the backend performs the arithmetic](#why-the-backend-performs-the-arithmetic).
-- **Standard library only in the backend.** Go's `net/http` router handles method and path matching, so no framework is needed. The backend has no third-party dependencies.
-- **The arithmetic is independent of HTTP.** `internal/calculator` has plain functions that return named errors (`ErrDivisionByZero` and others). The HTTP layer decides how those become status codes.
-- **Strict validation.** Unknown fields, duplicate fields, wrong-case field names and an extra `b` on a one-operand operation are rejected, not ignored, so client mistakes surface instead of producing a plausible wrong answer.
-- **`400` versus `422`.** An invalid request and a valid request that cannot be computed are different problems, and clients can tell them apart by status code alone.
-- **One table defines the operations.** Each operation declares whether it takes one operand or two, and validation reads that table. Adding an operation does not add special cases.
-- **A versioned path.** `/api/v1` leaves room for incompatible changes later.
-- **Frontend state is a pure reducer.** All input rules live in one function with no React and no side effects. The hook is the only place that calls the service.
-- **The service is passed in, not imported.** `<Calculator>` receives the calculation function as a prop, which keeps components free of HTTP and makes them simple to test.
-- **Late responses are ignored.** Each request carries an id, so a response that arrives after Clear cannot overwrite the display.
+Each choice below is explained by what it does in this codebase.
+
+### React + TypeScript
+
+- **React fits the shape of the UI.** The keypad is 21 instances of one `Key` component, and the display is a function of the calculator state. State lives in one reducer (`calculatorReducer.ts`), which React's `useReducer` runs, so the input rules are a plain function that is tested without rendering anything.
+- **TypeScript encodes the API contract.** `Operation` is a union of the exact names the API accepts, and a request is a union of two shapes: two-operand requests have `b` and one-operand requests do not. Sending `b` with `sqrt`, or omitting it for `add`, is a compile error.
+- **Adding an operation is guided by the compiler.** The operation tables are typed as `Record<BinaryOperation, …>` and `Record<UnaryOperation, …>`, so a new name does not compile until its symbol and label are defined.
+- **The calculation status is a discriminated union** (`idle`, `pending`, `success`, `error`), so a result can only be read in the `success` state and an error message only in `error`.
+- The project compiles with `strict` and further checks enabled, and uses no `any`. React and React DOM are the only runtime dependencies.
+
+### Go backend
+
+- **The standard library is enough.** `net/http` matches methods and paths (`"POST /api/v1/calculate"`), limits the body size, and shuts down gracefully; `encoding/json` reads the body. The module has no third-party dependencies.
+- **Errors are values.** Operations that can fail return an error next to the result (`Divide`, `Power`, `Sqrt`), and the handler checks for specific ones with `errors.Is`. Go's arithmetic would otherwise return `Inf` or `NaN`, which JSON cannot represent.
+- **Same number format as the browser.** Go's `float64` and JavaScript's `number` are both IEEE 754 doubles, so operands and results cross the API without conversion or loss.
+- **Testing is built in.** `httptest` runs the real handler behind a real HTTP server in the tests, with no extra tooling.
+
+### REST API
+
+- **Plain JSON over HTTP** is what the browser's `fetch` speaks natively and what `curl` can exercise, so the API is usable and testable without a client library.
+- **Status codes carry meaning.** `400` is an invalid request and `422` is a valid request that cannot be computed. The frontend relies on this: its message for every server error, and its fallback for any error text it does not recognise, are chosen from the status code alone.
+- **One endpoint with an `operation` field**, not one endpoint per operation. A calculation is an action with no stored resource, so it is a `POST`. Power, square root and percentage were each added without a new route.
+- **Stateless.** Every request carries everything needed, which is why `percent` is defined as a function of one number and not of a calculation in progress.
+- **Versioned path.** `/api/v1` leaves room for an incompatible change later.
+
+### Separation between HTTP handlers and calculator logic
+
+- **`internal/calculator` knows nothing about HTTP.** It imports only `errors` and `math`. Its functions take numbers and return numbers, so they are tested as plain functions with table-driven tests.
+- **`internal/server` knows nothing about arithmetic.** It decodes and validates the request, looks the operation up in one table, and translates the outcome: named calculator errors become `422`, anything unexpected becomes a generic `500` whose details are logged and not returned.
+- **The table is the only link between them.** Each entry names a calculator function and says whether it takes one operand or two. Adding percentage changed 7 lines in the calculator package and 10 in the handler.
+
+### API service layer in the frontend
+
+- **`fetch` appears in one file**, `services/calculatorApi.ts`. It builds the request, parses the response defensively, and reports any failure as one error type with a kind (`network`, `timeout`, `http`, `invalid_response`).
+- **Components and state do not import the service.** `<Calculator>` receives a function of type `(request) => Promise<number>` as a prop; only `App.tsx` imports the API-backed implementation.
+- **This made the integration a one-line change.** The UI was first built against a temporary local stand-in. Connecting it to the API replaced that function in `App.tsx`; the reducer and the hook were not modified.
+- **It also makes tests simple.** Component tests pass in a fake service and control when it answers, which is how the loading state is tested.
+
+### Automated testing strategy
+
+- **Each layer is tested where its behaviour is visible**: arithmetic as functions, the API through real HTTP requests, state as a reducer, and the UI by pressing keys and reading the display. See [Testing strategy](#testing-strategy).
+- **The boundaries are where the mocks go.** The backend tests need no frontend. The frontend tests replace only `fetch` (or the injected service), so everything on the frontend side of the network runs for real.
+- **Tests assert exact output**: status codes with complete JSON bodies on the backend, and accessible names and visible text on the frontend. Class names and internal state are never asserted, so restyling or restructuring does not break them.
+- **Rule precedence is tested.** When a request has several problems, tests fix which error is reported, so clients see stable behaviour.
+
+### API validation
+
+- **Requests are read field by field, not decoded straight into a struct.** Go's JSON decoder matches field names case-insensitively and lets a repeated field silently overwrite the first. Reading tokens makes names exact and catches duplicates.
+- **Mistakes are rejected, not tolerated.** Unknown fields, duplicate fields and a `b` sent with a one-operand operation each return `400`. Ignoring them would return a plausible answer to a request the client did not mean to send.
+- **Missing is different from zero.** A missing or `null` operand is an error; it is never treated as `0`.
+- **Checks run in a fixed, documented order**, and only the first failure is reported, so the same bad request always gets the same answer.
+- **The body is capped at 1024 bytes**, far more than any valid request needs.
+
+### Error handling approach
+
+- **One error shape.** Every error under `/api/` is `{"error": "…"}` with a JSON content type, including `404` and `405`, so a client needs one parser.
+- **The API describes; the frontend decides the wording.** API messages are technical. The frontend translates every failure in one function (`calculationErrorMessages.ts`) and never shows API text or a raw exception.
+- **Server errors are judged by status only.** For any `5xx` the response text is ignored, so a failing server can never be shown as a calculation error.
+- **Only one error type reaches the screen.** When the service fails, the hook displays its message only if the failure is a `CalculationError`; anything else, such as a bug, gets a generic message.
+- **Errors are recoverable.** The entered numbers are kept after a failure, so the user can correct the input or retry, and each request carries an id so a response that arrives after Clear is ignored.
+
+### Why the frontend does not calculate the result
+
+The frontend never computes a result. It sends the operands and shows what the API returns.
+
+- **One source of truth.** The rules of the calculator (what division by zero returns, when a power has no real result, when a result is out of range) are defined once, in Go. Any other client of the API gets identical behaviour.
+- **No second implementation to keep in step.** A copy of the arithmetic in TypeScript would have to match the backend in every edge case, and a mismatch would only show up as the UI and the API disagreeing.
+- **The same applies to the rules, not only the sums.** The frontend does not check for division by zero or a negative square root. It sends the request and shows the backend's answer.
+
+Two things do happen locally, and neither is arithmetic on the result. Before sending, the frontend checks that the entry is complete and the operands are finite numbers. After receiving, it formats the number for display to 15 significant digits, so `0.30000000000000004` is shown as `0.3`.
+
+The cost is a network round trip per calculation and no offline use. The loading state, the 10-second request timeout and the error messages exist to handle that.
+
+Tests enforce the rule: they make the mocked API answer `2 + 2` with `5` and check that the display shows `5`.
+
+### Other decisions
+
 - **A dev proxy instead of CORS.** The browser calls its own origin and Vite forwards `/api`, so the backend needs no cross-origin configuration for development.
-- **One meaning for percent.** `a ÷ 100` in every context, documented above, in preference to context-dependent pocket-calculator behaviour.
+- **One meaning for percent.** `a ÷ 100` in every context, in preference to context-dependent pocket-calculator behaviour. See [Percentage](#percentage).
 - **Plain CSS.** No UI framework; one stylesheet per component and shared colour variables.
 
 ## Known limitations
