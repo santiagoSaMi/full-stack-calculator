@@ -349,6 +349,81 @@ func TestSqrtIsInverseOfSquaring(t *testing.T) {
 	}
 }
 
+func TestPercent(t *testing.T) {
+	tests := []struct {
+		name string
+		x    float64
+		want float64
+	}{
+		// Positive values.
+		{"fifty", 50, 0.5},
+		{"one hundred", 100, 1},
+		{"one", 1, 0.01},
+		{"ten", 10, 0.1},
+		{"more than one hundred", 250, 2.5},
+		{"large value", 1e15, 1e13},
+
+		// Zero values.
+		{"zero", 0, 0},
+
+		// Negative values.
+		{"negative", -50, -0.5},
+		{"negative one hundred", -100, -1},
+		{"negative more than one hundred", -250, -2.5},
+
+		// Decimal values.
+		{"decimal", 12.5, 0.125},
+		{"decimal below one", 0.5, 0.005},
+		{"negative decimal", -0.25, -0.0025},
+		{"inexact decimal", 33.3, 0.333},
+		{"small decimal", 0.0001, 0.000001},
+		{"very small value", 1e-300, 1e-302},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Percent(tt.x); !approxEqual(got, tt.want) {
+				t.Errorf("Percent(%v) = %v, want %v", tt.x, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestPercentOfAValue checks the documented way to take a percentage of a
+// number: multiply it by Percent(p).
+func TestPercentOfAValue(t *testing.T) {
+	tests := []struct {
+		name        string
+		value, rate float64
+		want        float64
+	}{
+		{"10% of 200", 200, 10, 20},
+		{"50% of 80", 80, 50, 40},
+		{"100% of 42", 42, 100, 42},
+		{"0% of 42", 42, 0, 0},
+		{"150% of 60", 60, 150, 90},
+		{"12.5% of 80", 80, 12.5, 10},
+		{"-10% of 200", 200, -10, -20},
+		{"increase 200 by 10% (110% of 200)", 200, 110, 220},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Multiply(tt.value, Percent(tt.rate)); !approxEqual(got, tt.want) {
+				t.Errorf("%v * Percent(%v) = %v, want %v", tt.value, tt.rate, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestPercentIsFiniteForFiniteInput checks that Percent cannot overflow:
+// dividing by 100 only ever moves a value towards zero.
+func TestPercentIsFiniteForFiniteInput(t *testing.T) {
+	for _, x := range []float64{math.MaxFloat64, -math.MaxFloat64, math.SmallestNonzeroFloat64, 0} {
+		if got := Percent(x); math.IsInf(got, 0) || math.IsNaN(got) {
+			t.Errorf("Percent(%v) = %v, want a finite number", x, got)
+		}
+	}
+}
+
 func TestErrorMessages(t *testing.T) {
 	if got, want := ErrNegativeSquareRoot.Error(), "square root of a negative number"; got != want {
 		t.Errorf("ErrNegativeSquareRoot.Error() = %q, want %q", got, want)

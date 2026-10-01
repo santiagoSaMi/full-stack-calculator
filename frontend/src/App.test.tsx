@@ -170,6 +170,56 @@ describe('App', () => {
     })
   })
 
+  describe('percent', () => {
+    it('posts a single-operand request with no b and shows the result', async () => {
+      const request = pendingRequest()
+      render(<App />)
+
+      press('5', '0', 'Percent')
+
+      expect(fetchMock).toHaveBeenCalledOnce()
+      expect(sentBody()).toEqual({ operation: 'percent', a: 50 })
+      expect(sentBody()).not.toHaveProperty('b')
+
+      await request.respond(200, { result: 0.5 })
+
+      expect(value()).toBe('0.5')
+      expect(expression()).toBe('50% =')
+    })
+
+    it('takes 10% of 200 with two requests: percent, then multiply', async () => {
+      const rate = pendingRequest()
+      render(<App />)
+
+      press('2', '0', '0', 'Multiply', '1', '0', 'Percent')
+
+      expect(sentBody(0)).toEqual({ operation: 'percent', a: 10 })
+
+      await rate.respond(200, { result: 0.1 })
+
+      const product = pendingRequest()
+      press('Equals')
+
+      expect(sentBody(1)).toEqual({ operation: 'multiply', a: 200, b: 0.1 })
+
+      await product.respond(200, { result: 20 })
+
+      expect(value()).toBe('20')
+      expect(expression()).toBe('200 × 0.1 =')
+    })
+
+    it('shows a clear message if the API is unavailable', async () => {
+      const request = pendingRequest()
+      render(<App />)
+
+      press('5', '0', 'Percent')
+      await request.respond(502, '')
+
+      expect(alert()).toBe('The calculator service is unavailable. Please try again later.')
+      expect(value()).toBe('50')
+    })
+  })
+
   it('sends decimal and negative numbers as JSON numbers', () => {
     pendingRequest()
     render(<App />)
@@ -279,7 +329,7 @@ describe('App', () => {
       [
         'an unsupported operation',
         400,
-        { error: 'unsupported operation "modulo": must be one of add, subtract, multiply, divide, power, sqrt' },
+        { error: 'unsupported operation "modulo": must be one of add, subtract, multiply, divide, power, sqrt, percent' },
         'That operation is not supported.',
       ],
       [

@@ -15,8 +15,15 @@ export const OPERATIONS: Record<BinaryOperation, OperationInfo> = {
   power: { symbol: '^', label: 'Power' },
 }
 
-export const UNARY_OPERATIONS: Record<UnaryOperation, OperationInfo> = {
-  sqrt: { symbol: '√', label: 'Square root' },
+export interface UnaryOperationInfo extends OperationInfo {
+  /** Writes the operation applied to an operand, e.g. "√(9)" or "50%". */
+  format: (operand: string) => string
+}
+
+export const UNARY_OPERATIONS: Record<UnaryOperation, UnaryOperationInfo> = {
+  sqrt: { symbol: '√', label: 'Square root', format: (operand) => `√(${operand})` },
+  // The operand as a percentage: the API divides it by 100.
+  percent: { symbol: '%', label: 'Percent', format: (operand) => `${operand}%` },
 }
 
 export function isUnaryRequest(request: CalculationRequest): request is UnaryCalculationRequest {

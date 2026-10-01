@@ -38,8 +38,8 @@ describe('errors the backend reports about the calculation', () => {
   })
 
   it.each([
-    'unsupported operation "modulo": must be one of add, subtract, multiply, divide, power, sqrt',
-    'unsupported operation "ADD": must be one of add, subtract, multiply, divide, power, sqrt',
+    'unsupported operation "modulo": must be one of add, subtract, multiply, divide, power, sqrt, percent',
+    'unsupported operation "ADD": must be one of add, subtract, multiply, divide, power, sqrt, percent',
     // The list of operations in the message may grow; only the prefix matters.
     'unsupported operation "log": must be one of add, subtract, multiply, divide',
   ])('explains an unsupported operation', (apiMessage) => {
@@ -55,6 +55,7 @@ describe('errors about the request itself', () => {
   it.each([
     [400, 'field "a" is required'],
     [400, 'field "b" is not allowed for operation "sqrt"'],
+    [400, 'field "b" is not allowed for operation "percent"'],
     [400, 'field "b" must be a number'],
     [400, 'field "operation" must be a string'],
     [400, 'request body contains malformed JSON'],

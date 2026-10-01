@@ -90,8 +90,17 @@
   --key-bg-active: var(--accent-active);
   --key-text: var(--accent-text);
 
+  /* Equals has a row of its own, across the full width of the keypad. */
+  grid-column: 1 / -1;
   border-color: transparent;
   font-size: 1.5rem;
+}
+
+/* Short screens: slightly lower keys (still 44px) so six rows fit without scrolling. */
+@media (max-height: 40rem) {
+  .key {
+    min-height: 2.75rem;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

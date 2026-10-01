@@ -2,7 +2,7 @@
 export type BinaryOperation = 'add' | 'subtract' | 'multiply' | 'divide' | 'power'
 
 /** An operation on a single operand. Values match the backend API's `operation` field. */
-export type UnaryOperation = 'sqrt'
+export type UnaryOperation = 'sqrt' | 'percent'
 
 export type Operation = BinaryOperation | UnaryOperation
 

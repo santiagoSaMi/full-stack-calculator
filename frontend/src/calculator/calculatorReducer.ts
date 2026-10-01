@@ -190,7 +190,7 @@ export function validateUnarySubmission(state: CalculatorState, operation: Unary
   return { ok: true, request: { operation, a } }
 }
 
-/** Text for the display's secondary line, e.g. "12 +", "12 + 3 =" or "√(9) =". */
+/** Text for the display's secondary line, e.g. "12 +", "12 + 3 =", "√(9) =" or "200 × 10%". */
 export function selectExpression(state: CalculatorState): string {
   const { calculation } = state
   const inProgress =
@@ -201,7 +201,7 @@ export function selectExpression(state: CalculatorState): string {
   if (calculation.status === 'pending' || calculation.status === 'success') {
     const { request } = calculation
     if (isUnaryRequest(request)) {
-      const applied = `${UNARY_OPERATIONS[request.operation].symbol}(${formatNumber(request.a)})`
+      const applied = UNARY_OPERATIONS[request.operation].format(formatNumber(request.a))
       // Inside a two-operand calculation it stands for the second operand.
       return inProgress === '' ? `${applied} =` : `${inProgress} ${applied}`
     }

@@ -65,6 +65,18 @@ describe('useCalculator while a calculation is pending', () => {
     expect(service).toHaveBeenCalledWith({ operation: 'add', a: 6, b: 3 })
   })
 
+  it('does not apply a different single-operand operation', () => {
+    const service = pendingService()
+    const { calculator, run } = renderCalculatorHook(service)
+
+    run(() => calculator().inputDigit('9'))
+    run(() => calculator().applyUnaryOperation('percent'))
+    run(() => calculator().applyUnaryOperation('sqrt'))
+
+    expect(service).toHaveBeenCalledOnce()
+    expect(service).toHaveBeenCalledWith({ operation: 'percent', a: 9 })
+  })
+
   it('does not report a validation error over the pending calculation', () => {
     const service = pendingService()
     const { calculator, run } = renderCalculatorHook(service)

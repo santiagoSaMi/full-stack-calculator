@@ -79,6 +79,12 @@ describe('request', () => {
     expect(fetchMock.mock.calls[0]![1]?.body).toBe('{"operation":"sqrt","a":9}')
   })
 
+  it('sends a percent request with a single operand and no b', async () => {
+    await calculate({ operation: 'percent', a: 12.5 })
+
+    expect(fetchMock.mock.calls[0]![1]?.body).toBe('{"operation":"percent","a":12.5}')
+  })
+
   it('forwards the abort signal', async () => {
     const { signal } = new AbortController()
 

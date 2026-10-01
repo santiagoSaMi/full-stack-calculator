@@ -67,6 +67,7 @@ describe('Calculator', () => {
         Clear: 'C',
         'Toggle sign': '±',
         'Square root': '√',
+        Percent: '%',
         Power: '^',
         Divide: '÷',
         Multiply: '×',
@@ -545,6 +546,125 @@ describe('Calculator', () => {
 
       expect(value()).toBe('0')
       expect(expression()).toBe('')
+    })
+  })
+
+  describe('percent', () => {
+    it('sends the number shown as the only operand, without pressing Equals', () => {
+      const { service } = renderCalculator()
+
+      press('5', '0', 'Percent')
+
+      expect(service).toHaveBeenCalledOnce()
+      expect(service).toHaveBeenCalledWith({ operation: 'percent', a: 50 })
+    })
+
+    it('shows a loading state, then the result from the service', async () => {
+      const { resolve } = renderCalculator()
+
+      press('5', '0', 'Percent')
+
+      expect(isLoading()).toBe(true)
+      expect(expression()).toBe('50% =')
+
+      await resolve(0.5)
+
+      expect(isLoading()).toBe(false)
+      expect(value()).toBe('0.5')
+      expect(expression()).toBe('50% =')
+    })
+
+    it('shows what the service returned rather than dividing by 100 itself', async () => {
+      const { resolve } = renderCalculator()
+
+      press('5', '0', 'Percent')
+      await resolve(123)
+
+      expect(value()).toBe('123')
+    })
+
+    it.each<[string, KeyName[], number]>([
+      ['a decimal', ['1', '2', 'Decimal point', '5'], 12.5],
+      ['a negative number', ['5', '0', 'Toggle sign'], -50],
+      ['zero', [], 0],
+      ['more than one hundred', ['2', '5', '0'], 250],
+    ])('sends %s', (_name, keys, a) => {
+      const { service } = renderCalculator()
+
+      press(...keys, 'Percent')
+
+      expect(service).toHaveBeenCalledWith({ operation: 'percent', a })
+    })
+
+    it('takes a percentage of a number: 200 × 10 % =', async () => {
+      const { service, resolve } = renderCalculator()
+
+      press('2', '0', '0', 'Multiply', '1', '0', 'Percent')
+
+      expect(service).toHaveBeenLastCalledWith({ operation: 'percent', a: 10 })
+
+      await resolve(0.1)
+
+      expect(expression()).toBe('200 × 10%')
+      expect(value()).toBe('0.1')
+      expect(isSelected('Multiply')).toBe(true)
+
+      press('Equals')
+
+      expect(service).toHaveBeenLastCalledWith({ operation: 'multiply', a: 200, b: 0.1 })
+
+      await resolve(20)
+
+      expect(value()).toBe('20')
+    })
+
+    it('converts only the second operand after an addition: 200 + 10 % = sends 200 + 0.1', async () => {
+      const { service, resolve } = renderCalculator()
+
+      press('2', '0', '0', 'Add', '1', '0', 'Percent')
+      await resolve(0.1)
+      press('Equals')
+
+      expect(service).toHaveBeenLastCalledWith({ operation: 'add', a: 200, b: 0.1 })
+    })
+
+    it('does not mark any operation as selected', () => {
+      renderCalculator()
+
+      press('5', '0', 'Percent')
+
+      for (const name of ['Add', 'Subtract', 'Multiply', 'Divide', 'Power'] as const) {
+        expect(isSelected(name)).toBe(false)
+      }
+    })
+
+    it('can start the next calculation from its result', async () => {
+      const { service, resolve } = renderCalculator()
+
+      press('5', '0', 'Percent')
+      await resolve(0.5)
+      press('Multiply', '8', '0', 'Equals')
+
+      expect(service).toHaveBeenLastCalledWith({ operation: 'multiply', a: 0.5, b: 80 })
+    })
+
+    it('shows a service failure and keeps the number', async () => {
+      const { reject } = renderCalculator()
+
+      press('5', '0', 'Percent')
+      await reject(new CalculationError('Could not reach the calculator service. Check your connection.'))
+
+      expect(alert()).toBe('Could not reach the calculator service. Check your connection.')
+      expect(value()).toBe('50')
+    })
+
+    it('is disabled while a calculation is loading', () => {
+      const { service } = renderCalculator()
+
+      press('5', '0', 'Percent')
+
+      expect(key('Percent')).toHaveProperty('disabled', true)
+      expect(service).toHaveBeenCalledOnce()
     })
   })
 

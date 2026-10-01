@@ -66,22 +66,22 @@ export function Keypad({
       </Key>
       {unaryOperationKey('sqrt')}
       {operationKey('power')}
-      {operationKey('divide')}
+      {unaryOperationKey('percent')}
 
       {digitKey('7')}
       {digitKey('8')}
       {digitKey('9')}
-      {operationKey('multiply')}
+      {operationKey('divide')}
 
       {digitKey('4')}
       {digitKey('5')}
       {digitKey('6')}
-      {operationKey('subtract')}
+      {operationKey('multiply')}
 
       {digitKey('1')}
       {digitKey('2')}
       {digitKey('3')}
-      {operationKey('add')}
+      {operationKey('subtract')}
 
       <Key variant="function" label="Toggle sign" disabled={disabled} onPress={onToggleSign}>
         ±
@@ -90,6 +90,8 @@ export function Keypad({
       <Key label="Decimal point" disabled={disabled} onPress={onDecimal}>
         .
       </Key>
+      {operationKey('add')}
+
       <Key variant="submit" label="Equals" disabled={disabled} onPress={onSubmit}>
         =
       </Key>

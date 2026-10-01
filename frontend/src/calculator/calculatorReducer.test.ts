@@ -551,6 +551,79 @@ describe('square root', () => {
   })
 })
 
+describe('percent', () => {
+  /** Applies percent to the number shown, with the given request id. */
+  function percent(state: CalculatorState, requestId = 1): CalculatorState {
+    const validation = validateUnarySubmission(state, 'percent')
+    if (!validation.ok) throw new Error(validation.message)
+    return calculatorReducer(state, { type: 'submit', requestId, request: validation.request })
+  }
+
+  it.each([
+    ['the number being typed', run(...type('50')), 50],
+    ['a decimal', run(...type('12.5')), 12.5],
+    ['a negative number', run(...type('-50')), -50],
+    ['zero', run(), 0],
+    ['the second operand of a calculation in progress', run(...type('200'), op('multiply'), ...type('10')), 10],
+  ])('sends %s as the only operand', (_name, state, a) => {
+    const validation = validateUnarySubmission(state, 'percent')
+
+    expect(validation).toEqual({ ok: true, request: { operation: 'percent', a } })
+    expect(validation.ok && 'b' in validation.request).toBe(false)
+  })
+
+  it('shows the operand with a percent sign while pending and after the result', () => {
+    const pending = percent(run(...type('50')))
+
+    expect(selectExpression(pending)).toBe('50% =')
+    expect(selectExpression(resolve(pending, 0.5))).toBe('50% =')
+    expect(selectDisplayValue(resolve(pending, 0.5))).toBe('0.5')
+  })
+
+  it('shows a negative or decimal operand as typed', () => {
+    expect(selectExpression(percent(run(...type('-12.5'))))).toBe('-12.5% =')
+  })
+
+  describe('inside a two-operand calculation', () => {
+    const pending = percent(run(...type('200'), op('multiply'), ...type('10')))
+    const done = resolve(pending, 0.1)
+
+    it('replaces only the second operand with the result', () => {
+      expect(done.firstOperand).toBe('200')
+      expect(done.operation).toBe('multiply')
+      expect(selectDisplayValue(done)).toBe('0.1')
+    })
+
+    it('shows the calculation in progress with the percentage in it', () => {
+      expect(selectExpression(pending)).toBe('200 × 10%')
+      expect(selectExpression(done)).toBe('200 × 10%')
+    })
+
+    it('lets the outer calculation be submitted with the converted value', () => {
+      expect(requestOf(done)).toEqual({ operation: 'multiply', a: 200, b: 0.1 })
+    })
+
+    it('does not treat addition specially: the second operand is just divided by 100', () => {
+      const added = resolve(percent(run(...type('200'), op('add'), ...type('10'))), 0.1)
+
+      expect(selectExpression(added)).toBe('200 + 10%')
+      expect(requestOf(added)).toEqual({ operation: 'add', a: 200, b: 0.1 })
+    })
+  })
+
+  it('uses the result as the first operand of the next calculation', () => {
+    const state = apply(resolve(percent(run(...type('50'))), 0.5), op('multiply'), ...type('80'))
+
+    expect(requestOf(state)).toEqual({ operation: 'multiply', a: 0.5, b: 80 })
+  })
+
+  it('can be applied again to its own result', () => {
+    const once = resolve(percent(run(...type('50'))), 0.5)
+
+    expect(validateUnarySubmission(once, 'percent')).toEqual({ ok: true, request: { operation: 'percent', a: 0.5 } })
+  })
+})
+
 describe('formatNumber', () => {
   it.each([
     [15, '15'],

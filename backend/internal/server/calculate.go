@@ -44,15 +44,23 @@ var operations = map[string]operation{
 	"divide":   {apply: calculator.Divide},
 	"power":    {apply: calculator.Power},
 	"sqrt":     {unary: true, apply: unary(calculator.Sqrt)},
+	"percent":  {unary: true, apply: unary(infallibleUnary(calculator.Percent))},
 }
 
 // supportedOperations lists the operation names in the order shown to clients.
-const supportedOperations = "add, subtract, multiply, divide, power, sqrt"
+const supportedOperations = "add, subtract, multiply, divide, power, sqrt, percent"
 
 // infallible adapts a binary operation that cannot fail to the common signature.
 func infallible(fn func(a, b float64) float64) func(a, b float64) (float64, error) {
 	return func(a, b float64) (float64, error) {
 		return fn(a, b), nil
+	}
+}
+
+// infallibleUnary adapts a single-operand operation that cannot fail.
+func infallibleUnary(fn func(x float64) float64) func(x float64) (float64, error) {
+	return func(x float64) (float64, error) {
+		return fn(x), nil
 	}
 }
 

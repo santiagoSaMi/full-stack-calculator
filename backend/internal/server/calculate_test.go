@@ -189,7 +189,7 @@ func TestCalculatePower(t *testing.T) {
 		{
 			name: "wrong case", body: `{"operation":"Power","a":2,"b":3}`,
 			wantStatus: 400,
-			wantBody:   `{"error":"unsupported operation \"Power\": must be one of add, subtract, multiply, divide, power, sqrt"}`,
+			wantBody:   `{"error":"unsupported operation \"Power\": must be one of add, subtract, multiply, divide, power, sqrt, percent"}`,
 		},
 	})
 }
@@ -240,9 +240,68 @@ func TestCalculateSquareRoot(t *testing.T) {
 		{
 			name: "wrong case", body: `{"operation":"SQRT","a":9}`,
 			wantStatus: 400,
-			wantBody:   `{"error":"unsupported operation \"SQRT\": must be one of add, subtract, multiply, divide, power, sqrt"}`,
+			wantBody:   `{"error":"unsupported operation \"SQRT\": must be one of add, subtract, multiply, divide, power, sqrt, percent"}`,
 		},
 	})
+}
+
+func TestCalculatePercent(t *testing.T) {
+	const (
+		bNotAllowed = `{"error":"field \"b\" is not allowed for operation \"percent\""}`
+		aRequired   = `{"error":"field \"a\" is required"}`
+		aNotANumber = `{"error":"field \"a\" must be a number"}`
+		aOutOfRange = `{"error":"field \"a\" is out of range"}`
+	)
+	unsupported := func(op string) string {
+		return `{"error":"unsupported operation \"` + op + `\": must be one of add, subtract, multiply, divide, power, sqrt, percent"}`
+	}
+	runAPICases(t, []apiCase{
+		// Valid requests take a single operand and return it divided by 100.
+		{name: "fifty", body: `{"operation":"percent","a":50}`, wantStatus: 200, wantBody: `{"result":0.5}`},
+		{name: "one hundred", body: `{"operation":"percent","a":100}`, wantStatus: 200, wantBody: `{"result":1}`},
+		{name: "more than one hundred", body: `{"operation":"percent","a":250}`, wantStatus: 200, wantBody: `{"result":2.5}`},
+		{name: "one", body: `{"operation":"percent","a":1}`, wantStatus: 200, wantBody: `{"result":0.01}`},
+		{name: "zero", body: `{"operation":"percent","a":0}`, wantStatus: 200, wantBody: `{"result":0}`},
+		{name: "negative", body: `{"operation":"percent","a":-50}`, wantStatus: 200, wantBody: `{"result":-0.5}`},
+		{name: "decimal", body: `{"operation":"percent","a":12.5}`, wantStatus: 200, wantBody: `{"result":0.125}`},
+		{name: "decimal below one", body: `{"operation":"percent","a":0.5}`, wantStatus: 200, wantBody: `{"result":0.005}`},
+		{name: "largest operand does not overflow", body: `{"operation":"percent","a":1e308}`, wantStatus: 200, wantBody: `{"result":1e306}`},
+		{name: "fields in any order", body: `{"a":25,"operation":"percent"}`, wantStatus: 200, wantBody: `{"result":0.25}`},
+		{name: "explicit null b is treated as absent", body: `{"operation":"percent","a":50,"b":null}`, wantStatus: 200, wantBody: `{"result":0.5}`},
+
+		// A second operand is rejected: "a percent of b" is a multiplication.
+		{name: "with b", body: `{"operation":"percent","a":10,"b":200}`, wantStatus: 400, wantBody: bNotAllowed},
+		{name: "with b of zero", body: `{"operation":"percent","a":10,"b":0}`, wantStatus: 400, wantBody: bNotAllowed},
+
+		// The operand is validated like any other.
+		{name: "missing a", body: `{"operation":"percent"}`, wantStatus: 400, wantBody: aRequired},
+		{name: "null a", body: `{"operation":"percent","a":null}`, wantStatus: 400, wantBody: aRequired},
+		{name: "only b", body: `{"operation":"percent","b":50}`, wantStatus: 400, wantBody: aRequired},
+		{name: "string a", body: `{"operation":"percent","a":"50"}`, wantStatus: 400, wantBody: aNotANumber},
+		{name: "string a with a percent sign", body: `{"operation":"percent","a":"50%"}`, wantStatus: 400, wantBody: aNotANumber},
+		{name: "a out of range", body: `{"operation":"percent","a":1e400}`, wantStatus: 400, wantBody: aOutOfRange},
+
+		// Only the exact name is accepted.
+		{name: "symbol", body: `{"operation":"%","a":50}`, wantStatus: 400, wantBody: unsupported("%")},
+		{name: "long name", body: `{"operation":"percentage","a":50}`, wantStatus: 400, wantBody: unsupported("percentage")},
+		{name: "wrong case", body: `{"operation":"Percent","a":50}`, wantStatus: 400, wantBody: unsupported("Percent")},
+		{name: "modulo is not percent", body: `{"operation":"modulo","a":10,"b":3}`, wantStatus: 400, wantBody: unsupported("modulo")},
+	})
+}
+
+// TestCalculatePercentOfAValue shows the documented way to take a percentage
+// of a number through the API: convert the rate with "percent", then multiply.
+func TestCalculatePercentOfAValue(t *testing.T) {
+	ts := newTestServer(t)
+
+	rate := send(t, ts, http.MethodPost, calculatePath, jsonType, `{"operation":"percent","a":10}`)
+	assertJSON(t, rate, `{"result":0.1}`)
+
+	product := send(t, ts, http.MethodPost, calculatePath, jsonType, `{"operation":"multiply","a":200,"b":0.1}`)
+	if product.status != http.StatusOK {
+		t.Fatalf("status = %d, want %d", product.status, http.StatusOK)
+	}
+	assertJSON(t, product, `{"result":20}`)
 }
 
 // TestCalculateBinaryOperationsStillRequireB guards the contract of the
@@ -279,7 +338,7 @@ func TestCalculateDivisionByZero(t *testing.T) {
 
 func TestCalculateUnsupportedOperation(t *testing.T) {
 	unsupported := func(op string) string {
-		return `{"error":"unsupported operation \"` + op + `\": must be one of add, subtract, multiply, divide, power, sqrt"}`
+		return `{"error":"unsupported operation \"` + op + `\": must be one of add, subtract, multiply, divide, power, sqrt, percent"}`
 	}
 	runAPICases(t, []apiCase{
 		{name: "unknown name", body: `{"operation":"modulo","a":10,"b":5}`, wantStatus: 400, wantBody: unsupported("modulo")},
@@ -475,7 +534,7 @@ func TestCalculateValidationOrder(t *testing.T) {
 		{
 			name: "unsupported operation before missing operands", body: `{"operation":"pow"}`,
 			wantStatus: 400,
-			wantBody:   `{"error":"unsupported operation \"pow\": must be one of add, subtract, multiply, divide, power, sqrt"}`,
+			wantBody:   `{"error":"unsupported operation \"pow\": must be one of add, subtract, multiply, divide, power, sqrt, percent"}`,
 		},
 		{
 			name: "operation type before operand type", body: `{"operation":1,"a":"x","b":2}`,

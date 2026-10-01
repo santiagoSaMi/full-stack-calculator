@@ -59,11 +59,25 @@ describe('Keypad', () => {
     expect(handlers.onSubmit).not.toHaveBeenCalled()
   })
 
-  it('never shows the Square root key as selected, since it acts immediately', () => {
-    renderKeypad({ activeOperation: 'add' })
+  it('reports the Percent key as the "percent" operation, and as nothing else', () => {
+    const handlers = renderKeypad()
 
-    expect(key('Square root').hasAttribute('aria-pressed')).toBe(false)
+    press('Percent')
+
+    expect(handlers.onUnaryOperation).toHaveBeenCalledOnce()
+    expect(handlers.onUnaryOperation).toHaveBeenCalledWith('percent')
+    expect(handlers.onOperation).not.toHaveBeenCalled()
+    expect(handlers.onSubmit).not.toHaveBeenCalled()
   })
+
+  it.each(['Square root', 'Percent'] as const)(
+    'never shows the %s key as selected, since it acts immediately',
+    (name) => {
+      renderKeypad({ activeOperation: 'add' })
+
+      expect(key(name).hasAttribute('aria-pressed')).toBe(false)
+    },
+  )
 
   it.each<[KeyName, 'onDecimal' | 'onToggleSign' | 'onSubmit' | 'onClear']>([
     ['Decimal point', 'onDecimal'],

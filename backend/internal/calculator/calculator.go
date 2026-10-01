@@ -71,3 +71,10 @@ func Sqrt(x float64) (float64, error) {
 	}
 	return math.Sqrt(x), nil
 }
+
+// Percent returns x expressed as a percentage, that is x divided by 100:
+// Percent(50) is 0.5. It is the value of "x%" as a plain number, so
+// multiplying by it takes a percentage of something: 200 * Percent(10) is 20.
+func Percent(x float64) float64 {
+	return x / 100
+}

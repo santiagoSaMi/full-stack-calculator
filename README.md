@@ -52,6 +52,7 @@ Request (`Content-Type: application/json`, max 1 KiB):
 | `divide`    | `a`, `b` | `a ÷ b` |
 | `power`     | `a`, `b` | `a` raised to `b`; `0` raised to `0` is `1` |
 | `sqrt`      | `a` only | The non-negative square root of `a` |
+| `percent`   | `a` only | `a ÷ 100`: `a` percent, as a plain number (see [Percentage](#percentage)) |
 
 One-operand operations take only `a`:
 
@@ -60,6 +61,35 @@ One-operand operations take only `a`:
 ```
 
 Sending `b` with a one-operand operation is an error rather than being ignored, so a client that sends a second operand by mistake finds out.
+
+#### Percentage
+
+`percent` has one meaning everywhere: it converts a number to a percentage by dividing it by 100. It is the value of "`a`%" written as a plain number.
+
+```json
+{ "operation": "percent", "a": 50 }
+```
+
+```json
+{ "result": 0.5 }
+```
+
+| Request `a` | Result | Read as |
+|-------------|--------|---------|
+| `50`        | `0.5`   | 50% |
+| `100`       | `1`     | 100% |
+| `12.5`      | `0.125` | 12.5% |
+| `250`       | `2.5`   | 250% |
+| `-50`       | `-0.5`  | −50% |
+| `0`         | `0`     | 0% |
+
+It takes a single operand, accepts any number (negative, decimal, above 100) and cannot fail for a valid request.
+
+**Taking a percentage of a number** is a multiplication by that result. "10% of 200" is `percent` of `10` (`0.1`), then `multiply` of `200` and `0.1` (`20`). In the calculator: `200 × 10 % =` shows `20`.
+
+**What it deliberately does not do.** `percent` never depends on another operand, so it does not treat addition and subtraction specially the way some pocket calculators do: `200 + 10 % =` is `200 + 0.1 = 200.1`, not `220`. To increase a number by a percentage, multiply by the total percentage: `200 × 110 % = 220`. To decrease it by 10%: `200 × 90 % = 180`. This keeps the operation a pure function of one number, with the same result in every context, and it is not a modulo (remainder) operation.
+
+In the calculator, the `%` key acts immediately on the number shown, like `√`, and leaves a calculation in progress untouched: after `200 × 10 %` the display shows `200 × 10%` with the value `0.1`, ready for `=`.
 
 Field names are case-sensitive. Unknown and duplicate fields are rejected. `null` is treated as missing.
 
@@ -94,7 +124,7 @@ Requests are validated in the order below, and only the **first** failing check 
 | 9 | No duplicate fields | `400` | `request body contains duplicate field "<name>"` |
 | 10 | `operation` is present and non-empty | `400` | `field "operation" is required` |
 | 11 | `operation` is a string | `400` | `field "operation" must be a string` |
-| 12 | `operation` is supported | `400` | `unsupported operation "<op>": must be one of add, subtract, multiply, divide, power, sqrt` |
+| 12 | `operation` is supported | `400` | `unsupported operation "<op>": must be one of add, subtract, multiply, divide, power, sqrt, percent` |
 | 13 | `a` is present, then a number, then fits in a 64-bit float | `400` | `field "a" is required` / `field "a" must be a number` / `field "a" is out of range` |
 | 14 | Two-operand operations: `b` is present, then a number, then fits in a 64-bit float | `400` | `field "b" is required` / `field "b" must be a number` / `field "b" is out of range` |
 | 15 | One-operand operations: `b` is absent | `400` | `field "b" is not allowed for operation "<op>"` |
