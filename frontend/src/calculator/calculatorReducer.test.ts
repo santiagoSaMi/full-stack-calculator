@@ -103,6 +103,18 @@ describe('entering an operand', () => {
     expect(selectDisplayValue(run(sign, digit('5')))).toBe('-5')
   })
 
+  it('ignores the decimal point once the digit limit is reached', () => {
+    const full = run(...Array.from({ length: MAX_DIGITS }, () => digit('9')))
+
+    expect(selectDisplayValue(apply(full, decimal))).toBe('9'.repeat(MAX_DIGITS))
+  })
+
+  it('still accepts the decimal point one digit before the limit', () => {
+    const almostFull = run(...Array.from({ length: MAX_DIGITS - 1 }, () => digit('9')))
+
+    expect(selectDisplayValue(apply(almostFull, decimal, digit('5')))).toBe(`${'9'.repeat(MAX_DIGITS - 1)}.5`)
+  })
+
   it(`stops at ${MAX_DIGITS} digits`, () => {
     const state = run(...Array.from({ length: MAX_DIGITS + 5 }, () => digit('9')))
     expect(selectDisplayValue(state)).toBe('9'.repeat(MAX_DIGITS))
@@ -170,6 +182,26 @@ describe('selecting an operation', () => {
 
     expect(selectExpression(state)).toBe('1 ÷')
     expect(selectDisplayValue(state)).toBe('9')
+  })
+
+  it('starts a negative second operand when the sign is toggled before any digit', () => {
+    const state = run(digit('5'), op('multiply'), sign, digit('3'))
+
+    expect(selectDisplayValue(state)).toBe('-3')
+    expect(requestOf(state)).toEqual({ operation: 'multiply', a: 5, b: -3 })
+  })
+
+  it('shows a pending minus sign for the second operand before its digits are typed', () => {
+    const state = run(digit('5'), op('multiply'), sign)
+
+    expect(selectDisplayValue(state)).toBe('-0')
+    expect(selectExpression(state)).toBe('5 ×')
+  })
+
+  it('removes the pending minus sign when the sign is toggled again', () => {
+    const state = run(digit('5'), op('multiply'), sign, sign, digit('3'))
+
+    expect(requestOf(state)).toEqual({ operation: 'multiply', a: 5, b: 3 })
   })
 
   it('enters the second operand separately', () => {

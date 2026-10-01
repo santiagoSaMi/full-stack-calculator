@@ -20,7 +20,60 @@ _TODO: Describe the Go service, its structure and responsibilities._
 
 ## Testing
 
-_TODO: Describe the testing strategy and how to run the tests for each part._
+Both parts are tested at several levels, and neither test suite needs the other part running: the backend tests start their own in-process HTTP server, and the frontend tests replace `fetch`, so no test makes a real network request.
+
+### Backend (Go)
+
+Run from `backend/`:
+
+| Command | What it does |
+|---------|--------------|
+| `make test` | Runs all tests (`go test ./...`). |
+| `make cover` | Runs all tests and prints coverage per function and in total. |
+| `make cover-html` | Also writes `coverage.html`, which shows covered and uncovered lines. |
+| `make clean` | Removes the generated coverage files. |
+
+The same without `make`:
+
+```bash
+go test ./...                                   # run all tests
+go test -cover ./...                            # coverage per package
+go test -coverprofile=coverage.out ./...        # write a coverage profile
+go tool cover -func=coverage.out                # coverage per function and in total
+go tool cover -html=coverage.out -o coverage.html   # HTML report
+go test -race ./...                             # run with the race detector
+```
+
+What is tested:
+
+- `internal/calculator`: unit tests for every operation, as table-driven tests.
+- `internal/server`: the HTTP API, through a real HTTP server and client (`httptest.NewServer`), checking status codes and exact JSON bodies for every validation rule.
+- `cmd/server`: the port configuration, the server timeouts and graceful shutdown.
+
+### Frontend (React + TypeScript)
+
+Run from `frontend/`:
+
+| Command | What it does |
+|---------|--------------|
+| `npm run test` | Runs all tests once (Vitest). |
+| `npm run test:watch` | Reruns tests as files change. |
+| `npm run test:coverage` | Runs all tests, prints a coverage table and writes an HTML report to `coverage/index.html`. Fails if coverage drops below 95%. |
+| `npm run typecheck` | Type-checks the project, including the tests. |
+| `npm run lint` | Lints the project. |
+
+What is tested:
+
+- `src/calculator`: the state reducer and its validation, as plain unit tests.
+- `src/services`: the API client and error-message translation, with `fetch` mocked.
+- `src/components` and `src/App.tsx`: component tests (Testing Library) that press keys by their accessible names and read what the display shows.
+
+Coverage is measured over every file in `src/` except the tests themselves, the test helpers in `src/test/`, and type declarations (`src/types/`, `*.d.ts`).
+
+### What is deliberately not covered
+
+- **Backend `main()`**: it only wires the pieces together (signal handling, opening the port, `log.Fatal`). The logic it calls is tested; the function itself can only run as a real process.
+- **One defensive branch in the frontend** (`selectDisplayValue`'s final fallback): it guards a state the reducer cannot produce, so testing it would mean constructing an impossible state by hand.
 
 ## Setup
 

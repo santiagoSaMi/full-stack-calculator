@@ -114,6 +114,18 @@ describe('Calculator', () => {
       expect(value()).toBe(shown)
     })
 
+    it('starts a negative second operand when the sign is pressed before its digits', () => {
+      const { service } = renderCalculator()
+
+      press('5', 'Multiply', 'Toggle sign', '3')
+
+      expect(value()).toBe('-3')
+
+      press('Equals')
+
+      expect(service).toHaveBeenCalledWith({ operation: 'multiply', a: 5, b: -3 })
+    })
+
     it('does not keep leading zeros', () => {
       renderCalculator()
 

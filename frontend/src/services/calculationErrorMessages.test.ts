@@ -73,6 +73,12 @@ describe('errors about the request itself', () => {
     expect(userMessageFor(statusError(400))).toBe(ERROR_MESSAGES.invalidRequest)
   })
 
+  it('reports an HTTP error that carries no status generically', () => {
+    const error = new CalculatorApiError('http', 'Request failed')
+
+    expect(userMessageFor(error)).toBe('Something went wrong. Please try again.')
+  })
+
   it.each([401, 403, 404, 405, 429])('reports an unexpected %i generically', (status) => {
     expect(userMessageFor(statusError(status))).toBe('Something went wrong. Please try again.')
     expect(userMessageFor(apiError(status, 'not found'))).toBe('Something went wrong. Please try again.')
