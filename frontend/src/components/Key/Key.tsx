@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import './Key.css'
 
-export type KeyVariant = 'digit' | 'operation' | 'function'
+export type KeyVariant = 'digit' | 'operation' | 'function' | 'submit'
 
 export interface KeyProps {
   children: ReactNode
@@ -11,10 +11,9 @@ export interface KeyProps {
   label?: string
   /** Marks a toggle key (e.g. the selected operation) as active. */
   pressed?: boolean
+  disabled?: boolean
   /** Number of grid columns the key spans. */
-  colSpan?: 1 | 2 | 3
-  /** Number of grid rows the key spans. */
-  rowSpan?: 1 | 2
+  colSpan?: 1 | 2
 }
 
 export function Key({
@@ -23,20 +22,22 @@ export function Key({
   variant = 'digit',
   label,
   pressed,
+  disabled = false,
   colSpan = 1,
-  rowSpan = 1,
 }: KeyProps) {
-  const className = [
-    'key',
-    `key--${variant}`,
-    colSpan > 1 && `key--col-span-${colSpan}`,
-    rowSpan > 1 && `key--row-span-${rowSpan}`,
-  ]
+  const className = ['key', `key--${variant}`, colSpan > 1 && `key--col-span-${colSpan}`]
     .filter(Boolean)
     .join(' ')
 
   return (
-    <button type="button" className={className} onClick={onPress} aria-label={label} aria-pressed={pressed}>
+    <button
+      type="button"
+      className={className}
+      onClick={onPress}
+      disabled={disabled}
+      aria-label={label}
+      aria-pressed={pressed}
+    >
       {children}
     </button>
   )

@@ -9,9 +9,24 @@
   font-variant-numeric: tabular-nums;
 }
 
-.display__expression {
+.display__expression,
+.display__error {
   min-height: 1.5rem;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.display__expression {
   color: var(--text-muted);
+}
+
+.display__error {
+  color: var(--error);
+}
+
+.display[aria-busy='true'] .display__value {
+  opacity: 0.5;
 }
 
 .display__value {
