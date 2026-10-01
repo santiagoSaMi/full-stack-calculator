@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { VALIDATION_MESSAGES } from '../../calculator/calculatorReducer.ts'
 import { CalculationError } from '../../calculator/errors.ts'
 import type { CalculationRequest, CalculationService } from '../../calculator/types.ts'
+import type { KeyName } from '../../test/calculatorPage.ts'
+import { alert, expression, isLoading, isSelected, key, KEY_NAMES, press, value } from '../../test/calculatorPage.ts'
 import { Calculator } from './Calculator.tsx'
 
 afterEach(cleanup)
@@ -24,108 +26,349 @@ function deferredService() {
   }
 }
 
-/** Presses keys by their accessible names, e.g. press('1', '2', 'Add'). */
-function press(...names: string[]) {
-  for (const name of names) {
-    fireEvent.click(screen.getByRole('button', { name }))
-  }
+/** Renders the calculator with a service that never answers. */
+function renderCalculator() {
+  const deferred = deferredService()
+  render(<Calculator calculate={deferred.service} />)
+  return deferred
 }
 
-const value = () => screen.getByLabelText('Value').textContent
-const expression = () => screen.queryByLabelText('Expression')?.textContent
-const alert = () => screen.queryByRole('alert')?.textContent ?? null
-const isLoading = () => screen.queryByText('Calculating…') !== null
-const key = (name: string) => screen.getByRole('button', { name })
-
 describe('Calculator', () => {
-  it('sends the entered calculation to the service', () => {
-    const { service } = deferredService()
-    render(<Calculator calculate={service} />)
+  describe('rendering', () => {
+    it('is a labelled region', () => {
+      renderCalculator()
 
-    press('1', '2', 'Add', '3', 'Equals')
+      expect(screen.getByRole('region', { name: 'Calculator' })).toBeTruthy()
+    })
 
-    expect(service).toHaveBeenCalledOnce()
-    expect(service).toHaveBeenCalledWith({ operation: 'add', a: 12, b: 3 } satisfies CalculationRequest)
+    it('starts at zero with nothing else on the display', () => {
+      renderCalculator()
+
+      expect(value()).toBe('0')
+      expect(expression()).toBe('')
+      expect(alert()).toBeNull()
+      expect(isLoading()).toBe(false)
+    })
+
+    it('shows every key, in reading order, with an accessible name', () => {
+      renderCalculator()
+
+      const names = screen.getAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent)
+
+      expect(names).toEqual([...KEY_NAMES])
+    })
+
+    it('shows the usual symbols on the keys', () => {
+      renderCalculator()
+
+      const symbols = Object.fromEntries(KEY_NAMES.map((name) => [name, key(name).textContent]))
+
+      expect(symbols).toMatchObject({
+        Clear: 'C',
+        'Toggle sign': '±',
+        Divide: '÷',
+        Multiply: '×',
+        Subtract: '−',
+        Add: '+',
+        'Decimal point': '.',
+        Equals: '=',
+      })
+    })
+
+    it('starts with every key enabled and no operation selected', () => {
+      renderCalculator()
+
+      for (const name of KEY_NAMES) {
+        expect(key(name)).toHaveProperty('disabled', false)
+      }
+      for (const name of ['Add', 'Subtract', 'Multiply', 'Divide'] as const) {
+        expect(isSelected(name)).toBe(false)
+      }
+    })
+
+    it('does not call the service on its own', () => {
+      const { service } = renderCalculator()
+
+      expect(service).not.toHaveBeenCalled()
+    })
   })
 
-  it.each([
-    ['Add', 'add'],
-    ['Subtract', 'subtract'],
-    ['Multiply', 'multiply'],
-    ['Divide', 'divide'],
-  ])('sends the %s key as the "%s" operation', (keyName, operation) => {
-    const { service } = deferredService()
-    render(<Calculator calculate={service} />)
+  describe('entering operands', () => {
+    it.each<[string, KeyName[], string]>([
+      ['a single digit', ['7'], '7'],
+      ['several digits', ['1', '2', '3'], '123'],
+      ['every digit', ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'], '1234567890'],
+      ['a decimal number', ['1', 'Decimal point', '5'], '1.5'],
+      ['a decimal point first', ['Decimal point', '5'], '0.5'],
+      ['a negative number', ['4', '2', 'Toggle sign'], '-42'],
+      ['the sign before the digits', ['Toggle sign', '5'], '-5'],
+      ['a negative decimal', ['0', 'Decimal point', '2', '5', 'Toggle sign'], '-0.25'],
+    ])('shows %s as it is typed', (_name, keys, shown) => {
+      renderCalculator()
 
-    press('8', keyName, '2', 'Equals')
+      press(...keys)
 
-    expect(service).toHaveBeenCalledWith({ operation, a: 8, b: 2 })
+      expect(value()).toBe(shown)
+    })
+
+    it('does not keep leading zeros', () => {
+      renderCalculator()
+
+      press('0', '0', '7')
+
+      expect(value()).toBe('7')
+    })
+
+    it('ignores a second decimal point', () => {
+      renderCalculator()
+
+      press('1', 'Decimal point', '5', 'Decimal point', '2')
+
+      expect(value()).toBe('1.52')
+    })
+
+    it('removes the minus sign when the sign is toggled twice', () => {
+      renderCalculator()
+
+      press('4', 'Toggle sign', 'Toggle sign')
+
+      expect(value()).toBe('4')
+    })
+
+    it('stops accepting digits after 15', () => {
+      renderCalculator()
+
+      press(...Array.from({ length: 18 }, (): KeyName => '9'))
+
+      expect(value()).toBe('999999999999999')
+    })
+
+    it('shows the second operand while keeping the first in the expression', () => {
+      renderCalculator()
+
+      press('1', '2', 'Add', '3', 'Decimal point', '5')
+
+      expect(expression()).toBe('12 +')
+      expect(value()).toBe('3.5')
+    })
+
+    it('does not call the service while typing', () => {
+      const { service } = renderCalculator()
+
+      press('1', '2', 'Add', '3')
+
+      expect(service).not.toHaveBeenCalled()
+    })
   })
 
-  it('sends decimal and negative operands', () => {
-    const { service } = deferredService()
-    render(<Calculator calculate={service} />)
+  describe('selecting an operation', () => {
+    it.each<[KeyName, string]>([
+      ['Add', '8 +'],
+      ['Subtract', '8 −'],
+      ['Multiply', '8 ×'],
+      ['Divide', '8 ÷'],
+    ])('shows the operation in the expression when %s is pressed', (name, shown) => {
+      renderCalculator()
 
-    press('1', 'Decimal point', '5', 'Toggle sign', 'Multiply', '0', 'Decimal point', '2', '5', 'Equals')
+      press('8', name)
 
-    expect(service).toHaveBeenCalledWith({ operation: 'multiply', a: -1.5, b: 0.25 })
+      expect(expression()).toBe(shown)
+      expect(value()).toBe('8')
+    })
+
+    it('marks the selected operation, and only that one', () => {
+      renderCalculator()
+
+      press('8', 'Multiply')
+
+      expect(isSelected('Multiply')).toBe(true)
+      expect(isSelected('Add')).toBe(false)
+      expect(isSelected('Subtract')).toBe(false)
+      expect(isSelected('Divide')).toBe(false)
+    })
+
+    it('switches to another operation before the second operand is typed', () => {
+      renderCalculator()
+
+      press('8', 'Add', 'Divide')
+
+      expect(expression()).toBe('8 ÷')
+      expect(isSelected('Divide')).toBe(true)
+      expect(isSelected('Add')).toBe(false)
+    })
+
+    it('switches the operation and keeps the second operand already typed', () => {
+      const { service } = renderCalculator()
+
+      press('8', 'Add', '2', 'Multiply', 'Equals')
+
+      expect(service).toHaveBeenCalledWith({ operation: 'multiply', a: 8, b: 2 })
+    })
+
+    it('drops a trailing decimal point from the first operand', () => {
+      renderCalculator()
+
+      press('1', '2', 'Decimal point', 'Add')
+
+      expect(expression()).toBe('12 +')
+    })
+
+    it('does not call the service', () => {
+      const { service } = renderCalculator()
+
+      press('8', 'Add')
+
+      expect(service).not.toHaveBeenCalled()
+    })
   })
 
-  it('displays the result returned by the service, not a locally computed one', async () => {
-    const { service, resolve } = deferredService()
-    render(<Calculator calculate={service} />)
+  describe('clearing', () => {
+    it('resets a number being typed', () => {
+      renderCalculator()
 
-    press('2', 'Add', '2', 'Equals')
-    await resolve(5)
+      press('1', '2', '3', 'Clear')
 
-    expect(value()).toBe('5')
-    expect(expression()).toBe('2 + 2 =')
+      expect(value()).toBe('0')
+    })
+
+    it('resets the operation and both operands', () => {
+      const { service } = renderCalculator()
+
+      press('1', '2', 'Add', '3', 'Clear')
+
+      expect(value()).toBe('0')
+      expect(expression()).toBe('')
+      expect(isSelected('Add')).toBe(false)
+
+      press('Equals')
+
+      expect(service).not.toHaveBeenCalled()
+    })
+
+    it('resets a displayed result', async () => {
+      const { resolve } = renderCalculator()
+
+      press('1', '2', 'Add', '3', 'Equals')
+      await resolve(15)
+      press('Clear')
+
+      expect(value()).toBe('0')
+      expect(expression()).toBe('')
+    })
+
+    it('dismisses a validation message', () => {
+      renderCalculator()
+
+      press('6', 'Equals')
+      expect(alert()).not.toBeNull()
+
+      press('Clear')
+
+      expect(alert()).toBeNull()
+      expect(value()).toBe('0')
+    })
+
+    it('allows a new calculation afterwards', () => {
+      const { service } = renderCalculator()
+
+      press('9', 'Add', '9', 'Clear', '2', 'Multiply', '3', 'Equals')
+
+      expect(service).toHaveBeenCalledOnce()
+      expect(service).toHaveBeenCalledWith({ operation: 'multiply', a: 2, b: 3 })
+    })
   })
 
-  it('shows a loading state until the service responds', async () => {
-    const { service, resolve } = deferredService()
-    render(<Calculator calculate={service} />)
+  describe('submitting and results', () => {
+    it('sends the entered calculation to the service', () => {
+      const { service } = deferredService()
+      render(<Calculator calculate={service} />)
 
-    expect(isLoading()).toBe(false)
+      press('1', '2', 'Add', '3', 'Equals')
 
-    press('6', 'Multiply', '7', 'Equals')
+      expect(service).toHaveBeenCalledOnce()
+      expect(service).toHaveBeenCalledWith({ operation: 'add', a: 12, b: 3 } satisfies CalculationRequest)
+    })
 
-    expect(isLoading()).toBe(true)
-    expect(expression()).toBe('6 × 7 =')
+    it.each<[KeyName, string]>([
+      ['Add', 'add'],
+      ['Subtract', 'subtract'],
+      ['Multiply', 'multiply'],
+      ['Divide', 'divide'],
+    ])('sends the %s key as the "%s" operation', (keyName, operation) => {
+      const { service } = deferredService()
+      render(<Calculator calculate={service} />)
 
-    await resolve(42)
+      press('8', keyName, '2', 'Equals')
 
-    expect(isLoading()).toBe(false)
-    expect(value()).toBe('42')
-  })
+      expect(service).toHaveBeenCalledWith({ operation, a: 8, b: 2 })
+    })
 
-  it('disables every key except Clear while loading', async () => {
-    const { service, resolve } = deferredService()
-    render(<Calculator calculate={service} />)
+    it('sends decimal and negative operands', () => {
+      const { service } = deferredService()
+      render(<Calculator calculate={service} />)
 
-    press('6', 'Multiply', '7', 'Equals')
+      press('1', 'Decimal point', '5', 'Toggle sign', 'Multiply', '0', 'Decimal point', '2', '5', 'Equals')
 
-    for (const name of ['7', 'Decimal point', 'Toggle sign', 'Add', 'Equals']) {
-      expect(key(name)).toHaveProperty('disabled', true)
-    }
-    expect(key('Clear')).toHaveProperty('disabled', false)
+      expect(service).toHaveBeenCalledWith({ operation: 'multiply', a: -1.5, b: 0.25 })
+    })
 
-    await resolve(42)
+    it('displays the result returned by the service, not a locally computed one', async () => {
+      const { service, resolve } = deferredService()
+      render(<Calculator calculate={service} />)
 
-    expect(key('7')).toHaveProperty('disabled', false)
-  })
+      press('2', 'Add', '2', 'Equals')
+      await resolve(5)
 
-  it('does not submit twice while loading', () => {
-    const { service } = deferredService()
-    render(<Calculator calculate={service} />)
+      expect(value()).toBe('5')
+      expect(expression()).toBe('2 + 2 =')
+    })
 
-    press('6', 'Multiply', '7', 'Equals', 'Equals')
+    it('shows a loading state until the service responds', async () => {
+      const { service, resolve } = deferredService()
+      render(<Calculator calculate={service} />)
 
-    expect(service).toHaveBeenCalledOnce()
+      expect(isLoading()).toBe(false)
+
+      press('6', 'Multiply', '7', 'Equals')
+
+      expect(isLoading()).toBe(true)
+      expect(expression()).toBe('6 × 7 =')
+
+      await resolve(42)
+
+      expect(isLoading()).toBe(false)
+      expect(value()).toBe('42')
+    })
+
+    it('disables every key except Clear while loading', async () => {
+      const { service, resolve } = deferredService()
+      render(<Calculator calculate={service} />)
+
+      press('6', 'Multiply', '7', 'Equals')
+
+      for (const name of KEY_NAMES.filter((name) => name !== 'Clear')) {
+        expect(key(name)).toHaveProperty('disabled', true)
+      }
+      expect(key('Clear')).toHaveProperty('disabled', false)
+
+      await resolve(42)
+
+      expect(key('7')).toHaveProperty('disabled', false)
+    })
+
+    it('does not submit twice while loading', () => {
+      const { service } = deferredService()
+      render(<Calculator calculate={service} />)
+
+      press('6', 'Multiply', '7', 'Equals', 'Equals')
+
+      expect(service).toHaveBeenCalledOnce()
+    })
+
   })
 
   describe('validation before submitting', () => {
-    it.each([
+    it.each<[string, KeyName[], string, string]>([
       ['nothing is entered', [], VALIDATION_MESSAGES.missingOperation, '0'],
       ['only the first operand is entered', ['6'], VALIDATION_MESSAGES.missingOperation, '6'],
       ['the second operand is empty', ['6', 'Multiply'], VALIDATION_MESSAGES.missingSecondOperand, '6'],
@@ -305,15 +548,5 @@ describe('Calculator', () => {
     expect(value()).toBe('0')
     expect(expression()).toBe('')
     expect(isLoading()).toBe(false)
-  })
-
-  it('resets the display on Clear', () => {
-    const { service } = deferredService()
-    render(<Calculator calculate={service} />)
-
-    press('1', '2', 'Add', '3', 'Clear')
-
-    expect(value()).toBe('0')
-    expect(expression()).toBe('')
   })
 })
