@@ -29,6 +29,14 @@ describe('apiCalculationService', () => {
     expect(calculateMock.mock.calls[0]![0]).toEqual({ operation: 'add', a: 10, b: 5 })
   })
 
+  it('passes a single-operand request through unchanged', async () => {
+    calculateMock.mockResolvedValue({ result: 3 })
+
+    await expect(apiCalculationService({ operation: 'sqrt', a: 9 })).resolves.toBe(3)
+
+    expect(calculateMock.mock.calls[0]![0]).toEqual({ operation: 'sqrt', a: 9 })
+  })
+
   it('gives the request a timeout signal', async () => {
     calculateMock.mockResolvedValue({ result: 0 })
 
@@ -44,10 +52,18 @@ describe('apiCalculationService', () => {
       'Cannot divide by zero.',
     ],
     [
+      'a square root of a negative number',
+      new CalculatorApiError('http', 'square root of a negative number', {
+        status: 422,
+        apiMessage: 'square root of a negative number',
+      }),
+      'Cannot take the square root of a negative number.',
+    ],
+    [
       'an unsupported operation',
       new CalculatorApiError('http', 'unsupported operation "pow"', {
         status: 400,
-        apiMessage: 'unsupported operation "pow": must be one of add, subtract, multiply, divide, power',
+        apiMessage: 'unsupported operation "pow": must be one of add, subtract, multiply, divide, power, sqrt',
       }),
       'That operation is not supported.',
     ],

@@ -7,14 +7,15 @@ import {
   selectExpression,
   selectIsPending,
   validateSubmission,
+  validateUnarySubmission,
 } from './calculatorReducer.ts'
 import { CalculationError, GENERIC_ERROR_MESSAGE } from './errors.ts'
-import type { CalculationService, Digit, Operation } from './types.ts'
+import type { BinaryOperation, CalculationService, Digit, UnaryOperation, Validation } from './types.ts'
 
 export interface UseCalculatorResult {
   expression: string
   displayValue: string
-  activeOperation: Operation | null
+  activeOperation: BinaryOperation | null
   /** User-facing message for the last failed or invalid calculation, or null. */
   error: string | null
   /** True while a submitted calculation is awaiting its result. */
@@ -22,7 +23,9 @@ export interface UseCalculatorResult {
   inputDigit: (digit: Digit) => void
   inputDecimal: () => void
   toggleSign: () => void
-  selectOperation: (operation: Operation) => void
+  selectOperation: (operation: BinaryOperation) => void
+  /** Applies a single-operand operation to the number shown. */
+  applyUnaryOperation: (operation: UnaryOperation) => void
   submit: () => void
   clear: () => void
 }
@@ -39,17 +42,15 @@ export function useCalculator(calculate: CalculationService): UseCalculatorResul
   const inputDecimal = useCallback(() => dispatch({ type: 'inputDecimal' }), [])
   const toggleSign = useCallback(() => dispatch({ type: 'toggleSign' }), [])
   const selectOperation = useCallback(
-    (operation: Operation) => dispatch({ type: 'selectOperation', operation }),
+    (operation: BinaryOperation) => dispatch({ type: 'selectOperation', operation }),
     [],
   )
   const clear = useCallback(() => dispatch({ type: 'clear' }), [])
 
   const isPending = selectIsPending(state)
 
-  const submit = () => {
-    if (isPending) return
-
-    const validation = validateSubmission(state)
+  /** Sends a validated calculation to the service, or reports why it cannot be sent. */
+  const send = (validation: Validation) => {
     if (!validation.ok) {
       dispatch({ type: 'invalidate', message: validation.message })
       return
@@ -66,6 +67,14 @@ export function useCalculator(calculate: CalculationService): UseCalculatorResul
     )
   }
 
+  const submit = () => {
+    if (!isPending) send(validateSubmission(state))
+  }
+
+  const applyUnaryOperation = (operation: UnaryOperation) => {
+    if (!isPending) send(validateUnarySubmission(state, operation))
+  }
+
   return {
     expression: selectExpression(state),
     displayValue: selectDisplayValue(state),
@@ -76,6 +85,7 @@ export function useCalculator(calculate: CalculationService): UseCalculatorResul
     inputDecimal,
     toggleSign,
     selectOperation,
+    applyUnaryOperation,
     submit,
     clear,
   }

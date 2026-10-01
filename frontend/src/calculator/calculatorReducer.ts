@@ -1,11 +1,12 @@
-import { OPERATIONS } from './operations.ts'
+import { isUnaryRequest, OPERATIONS, UNARY_OPERATIONS } from './operations.ts'
 import type {
+  BinaryOperation,
   CalculationRequest,
   CalculatorAction,
   CalculatorState,
   Digit,
   InputAction,
-  Operation,
+  UnaryOperation,
   Validation,
 } from './types.ts'
 
@@ -43,9 +44,13 @@ export function calculatorReducer(state: CalculatorState, action: CalculatorActi
       const pending = currentRequest(state, action.requestId)
       if (pending === null) return state
       // The result becomes the input, so it can start the next calculation.
+      // A single-operand result only replaces the number it was applied to: a
+      // two-operand calculation in progress (e.g. "9 + √16") is kept.
+      const inProgress = isUnaryRequest(pending)
+        ? { firstOperand: state.firstOperand, operation: state.operation }
+        : { firstOperand: null, operation: null }
       return {
-        firstOperand: null,
-        operation: null,
+        ...inProgress,
         currentInput: formatNumber(action.result),
         inputIsResult: true,
         calculation: { status: 'success', request: pending, result: action.result },
@@ -128,7 +133,7 @@ function normalizeOperand(input: string): string {
   return input.endsWith('.') ? input.slice(0, -1) : input
 }
 
-function selectOperation(state: CalculatorState, operation: Operation): CalculatorState {
+function selectOperation(state: CalculatorState, operation: BinaryOperation): CalculatorState {
   // First operator: the current input becomes the first operand.
   if (state.operation === null) {
     return {
@@ -171,15 +176,39 @@ export function validateSubmission(state: CalculatorState): Validation {
   return { ok: true, request: { operation: state.operation, a, b } }
 }
 
-/** Text for the display's secondary line, e.g. "12 +" or "12 + 3 =". */
+/**
+ * Checks whether a single-operand operation can be applied. It acts on the
+ * number currently shown, like the key on a physical calculator. As with
+ * validateSubmission, only what the frontend alone can know is checked:
+ * whether the operand is acceptable (e.g. not negative) is the backend's call.
+ */
+export function validateUnarySubmission(state: CalculatorState, operation: UnaryOperation): Validation {
+  const a = Number(normalizeOperand(selectDisplayValue(state)))
+  if (!Number.isFinite(a)) {
+    return { ok: false, message: VALIDATION_MESSAGES.invalidNumber }
+  }
+  return { ok: true, request: { operation, a } }
+}
+
+/** Text for the display's secondary line, e.g. "12 +", "12 + 3 =" or "√(9) =". */
 export function selectExpression(state: CalculatorState): string {
   const { calculation } = state
+  const inProgress =
+    state.firstOperand === null || state.operation === null
+      ? ''
+      : `${formatLeftOperand(state.firstOperand, state.operation)} ${OPERATIONS[state.operation].symbol}`
+
   if (calculation.status === 'pending' || calculation.status === 'success') {
-    const { a, b, operation } = calculation.request
+    const { request } = calculation
+    if (isUnaryRequest(request)) {
+      const applied = `${UNARY_OPERATIONS[request.operation].symbol}(${formatNumber(request.a)})`
+      // Inside a two-operand calculation it stands for the second operand.
+      return inProgress === '' ? `${applied} =` : `${inProgress} ${applied}`
+    }
+    const { a, b, operation } = request
     return `${formatLeftOperand(formatNumber(a), operation)} ${OPERATIONS[operation].symbol} ${formatNumber(b)} =`
   }
-  if (state.firstOperand === null || state.operation === null) return ''
-  return `${formatLeftOperand(state.firstOperand, state.operation)} ${OPERATIONS[state.operation].symbol}`
+  return inProgress
 }
 
 /**
@@ -187,7 +216,7 @@ export function selectExpression(state: CalculatorState): string {
  * "-2 ^ 2" conventionally means -(2 ^ 2) = -4, but the calculator raises the
  * whole operand: (-2) ^ 2 = 4.
  */
-function formatLeftOperand(operand: string, operation: Operation): string {
+function formatLeftOperand(operand: string, operation: BinaryOperation): string {
   return operation === 'power' && operand.startsWith('-') ? `(${operand})` : operand
 }
 

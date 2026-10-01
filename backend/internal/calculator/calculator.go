@@ -17,6 +17,9 @@ var ErrDivisionByZero = errors.New("division by zero")
 // exponent.
 var ErrNotRealNumber = errors.New("result is not a real number")
 
+// ErrNegativeSquareRoot is returned by Sqrt when its operand is negative.
+var ErrNegativeSquareRoot = errors.New("square root of a negative number")
+
 // Add returns the sum of a and b.
 func Add(a, b float64) float64 {
 	return a + b
@@ -54,4 +57,17 @@ func Power(base, exponent float64) (float64, error) {
 		return 0, ErrNotRealNumber
 	}
 	return math.Pow(base, exponent), nil
+}
+
+// Sqrt returns the non-negative square root of x.
+// It returns ErrNegativeSquareRoot if x is negative.
+func Sqrt(x float64) (float64, error) {
+	if x < 0 {
+		return 0, ErrNegativeSquareRoot
+	}
+	if x == 0 {
+		// Covers negative zero, whose square root would otherwise be -0.
+		return 0, nil
+	}
+	return math.Sqrt(x), nil
 }

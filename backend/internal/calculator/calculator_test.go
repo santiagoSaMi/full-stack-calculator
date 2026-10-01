@@ -272,7 +272,87 @@ func TestPowerNeverReturnsNaN(t *testing.T) {
 	}
 }
 
+func TestSqrt(t *testing.T) {
+	tests := []struct {
+		name string
+		x    float64
+		want float64
+	}{
+		// Perfect squares.
+		{"one", 1, 1},
+		{"four", 4, 2},
+		{"nine", 9, 3},
+		{"large perfect square", 1e10, 1e5},
+		{"very large value", 1e300, 1e150},
+
+		// Zero values.
+		{"zero", 0, 0},
+
+		// Non-perfect squares.
+		{"two", 2, math.Sqrt2},
+		{"three", 3, 1.7320508075688772},
+		{"ten", 10, 3.1622776601683795},
+
+		// Decimal values.
+		{"quarter", 0.25, 0.5},
+		{"decimal perfect square", 2.25, 1.5},
+		{"small decimal", 0.0001, 0.01},
+		{"decimal below one grows", 0.5, 0.7071067811865476},
+		{"very small value", 1e-300, 1e-150},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Sqrt(tt.x)
+			if err != nil {
+				t.Fatalf("Sqrt(%v) unexpected error: %v", tt.x, err)
+			}
+			if !approxEqual(got, tt.want) {
+				t.Errorf("Sqrt(%v) = %v, want %v", tt.x, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSqrtOfNegativeNumber(t *testing.T) {
+	for _, x := range []float64{-1, -4, -0.25, -1e-300, -1e300} {
+		got, err := Sqrt(x)
+		if !errors.Is(err, ErrNegativeSquareRoot) {
+			t.Errorf("Sqrt(%v) error = %v, want %v", x, err, ErrNegativeSquareRoot)
+		}
+		if got != 0 {
+			t.Errorf("Sqrt(%v) = %v, want 0 on error", x, got)
+		}
+	}
+}
+
+func TestSqrtOfNegativeZero(t *testing.T) {
+	got, err := Sqrt(math.Copysign(0, -1))
+	if err != nil {
+		t.Fatalf("Sqrt(-0) unexpected error: %v", err)
+	}
+	if got != 0 || math.Signbit(got) {
+		t.Errorf("Sqrt(-0) = %v, want positive zero", got)
+	}
+}
+
+// TestSqrtIsInverseOfSquaring checks Sqrt against Multiply for a range of
+// values, so the two operations stay consistent with each other.
+func TestSqrtIsInverseOfSquaring(t *testing.T) {
+	for _, x := range []float64{0, 0.5, 1, 1.5, 2, 7, 12.25, 100, 12345.678} {
+		got, err := Sqrt(Multiply(x, x))
+		if err != nil {
+			t.Fatalf("Sqrt(%v) unexpected error: %v", x*x, err)
+		}
+		if !approxEqual(got, x) {
+			t.Errorf("Sqrt(%v * %v) = %v, want %v", x, x, got, x)
+		}
+	}
+}
+
 func TestErrorMessages(t *testing.T) {
+	if got, want := ErrNegativeSquareRoot.Error(), "square root of a negative number"; got != want {
+		t.Errorf("ErrNegativeSquareRoot.Error() = %q, want %q", got, want)
+	}
 	if got, want := ErrNotRealNumber.Error(), "result is not a real number"; got != want {
 		t.Errorf("ErrNotRealNumber.Error() = %q, want %q", got, want)
 	}

@@ -189,9 +189,81 @@ func TestCalculatePower(t *testing.T) {
 		{
 			name: "wrong case", body: `{"operation":"Power","a":2,"b":3}`,
 			wantStatus: 400,
-			wantBody:   `{"error":"unsupported operation \"Power\": must be one of add, subtract, multiply, divide, power"}`,
+			wantBody:   `{"error":"unsupported operation \"Power\": must be one of add, subtract, multiply, divide, power, sqrt"}`,
 		},
 	})
+}
+
+func TestCalculateSquareRoot(t *testing.T) {
+	const (
+		negative     = `{"error":"square root of a negative number"}`
+		bNotAllowed  = `{"error":"field \"b\" is not allowed for operation \"sqrt\""}`
+		aRequired    = `{"error":"field \"a\" is required"}`
+		aNotANumber  = `{"error":"field \"a\" must be a number"}`
+		aOutOfRange  = `{"error":"field \"a\" is out of range"}`
+		unknownField = `{"error":"request body contains unknown field \"x\""}`
+	)
+	runAPICases(t, []apiCase{
+		// Valid requests take a single operand.
+		{name: "perfect square", body: `{"operation":"sqrt","a":9}`, wantStatus: 200, wantBody: `{"result":3}`},
+		{name: "decimal operand", body: `{"operation":"sqrt","a":2.25}`, wantStatus: 200, wantBody: `{"result":1.5}`},
+		{name: "decimal result", body: `{"operation":"sqrt","a":0.25}`, wantStatus: 200, wantBody: `{"result":0.5}`},
+		{name: "irrational result", body: `{"operation":"sqrt","a":2}`, wantStatus: 200, wantBody: `{"result":1.4142135623730951}`},
+		{name: "zero", body: `{"operation":"sqrt","a":0}`, wantStatus: 200, wantBody: `{"result":0}`},
+		{name: "negative zero", body: `{"operation":"sqrt","a":-0}`, wantStatus: 200, wantBody: `{"result":0}`},
+		{name: "large operand", body: `{"operation":"sqrt","a":1e300}`, wantStatus: 200, wantBody: `{"result":1e150}`},
+		{name: "fields in any order", body: `{"a":16,"operation":"sqrt"}`, wantStatus: 200, wantBody: `{"result":4}`},
+		{name: "explicit null b is treated as absent", body: `{"operation":"sqrt","a":9,"b":null}`, wantStatus: 200, wantBody: `{"result":3}`},
+
+		// Negative operands.
+		{name: "negative integer", body: `{"operation":"sqrt","a":-9}`, wantStatus: 422, wantBody: negative},
+		{name: "negative decimal", body: `{"operation":"sqrt","a":-0.25}`, wantStatus: 422, wantBody: negative},
+		{name: "tiny negative", body: `{"operation":"sqrt","a":-1e-300}`, wantStatus: 422, wantBody: negative},
+
+		// A second operand is rejected rather than ignored.
+		{name: "with b", body: `{"operation":"sqrt","a":9,"b":2}`, wantStatus: 400, wantBody: bNotAllowed},
+		{name: "with b of zero", body: `{"operation":"sqrt","a":9,"b":0}`, wantStatus: 400, wantBody: bNotAllowed},
+		{name: "with b of the wrong type", body: `{"operation":"sqrt","a":9,"b":"x"}`, wantStatus: 400, wantBody: bNotAllowed},
+
+		// The operand is validated like any other.
+		{name: "missing a", body: `{"operation":"sqrt"}`, wantStatus: 400, wantBody: aRequired},
+		{name: "null a", body: `{"operation":"sqrt","a":null}`, wantStatus: 400, wantBody: aRequired},
+		{name: "only b", body: `{"operation":"sqrt","b":9}`, wantStatus: 400, wantBody: aRequired},
+		{name: "string a", body: `{"operation":"sqrt","a":"9"}`, wantStatus: 400, wantBody: aNotANumber},
+		{name: "a out of range", body: `{"operation":"sqrt","a":1e400}`, wantStatus: 400, wantBody: aOutOfRange},
+		{name: "unknown field", body: `{"operation":"sqrt","a":9,"x":1}`, wantStatus: 400, wantBody: unknownField},
+
+		// Validation order: a problem with a is reported before the extra b.
+		{name: "invalid a before extra b", body: `{"operation":"sqrt","a":"9","b":2}`, wantStatus: 400, wantBody: aNotANumber},
+		// A negative operand is only judged once the request is valid.
+		{name: "extra b before negative a", body: `{"operation":"sqrt","a":-9,"b":2}`, wantStatus: 400, wantBody: bNotAllowed},
+		{
+			name: "wrong case", body: `{"operation":"SQRT","a":9}`,
+			wantStatus: 400,
+			wantBody:   `{"error":"unsupported operation \"SQRT\": must be one of add, subtract, multiply, divide, power, sqrt"}`,
+		},
+	})
+}
+
+// TestCalculateBinaryOperationsStillRequireB guards the contract of the
+// two-operand operations after single-operand requests were introduced.
+func TestCalculateBinaryOperationsStillRequireB(t *testing.T) {
+	const bRequired = `{"error":"field \"b\" is required"}`
+	ts := newTestServer(t)
+	for _, operation := range []string{"add", "subtract", "multiply", "divide", "power"} {
+		t.Run(operation, func(t *testing.T) {
+			for _, body := range []string{
+				`{"operation":"` + operation + `","a":9}`,
+				`{"operation":"` + operation + `","a":9,"b":null}`,
+			} {
+				res := send(t, ts, http.MethodPost, calculatePath, jsonType, body)
+				if res.status != http.StatusBadRequest {
+					t.Errorf("%s: status = %d, want %d", body, res.status, http.StatusBadRequest)
+				}
+				assertJSON(t, res, bRequired)
+			}
+		})
+	}
 }
 
 func TestCalculateDivisionByZero(t *testing.T) {
@@ -207,11 +279,13 @@ func TestCalculateDivisionByZero(t *testing.T) {
 
 func TestCalculateUnsupportedOperation(t *testing.T) {
 	unsupported := func(op string) string {
-		return `{"error":"unsupported operation \"` + op + `\": must be one of add, subtract, multiply, divide, power"}`
+		return `{"error":"unsupported operation \"` + op + `\": must be one of add, subtract, multiply, divide, power, sqrt"}`
 	}
 	runAPICases(t, []apiCase{
 		{name: "unknown name", body: `{"operation":"modulo","a":10,"b":5}`, wantStatus: 400, wantBody: unsupported("modulo")},
-		{name: "advanced operation", body: `{"operation":"sqrt","a":2,"b":3}`, wantStatus: 400, wantBody: unsupported("sqrt")},
+		{name: "advanced operation", body: `{"operation":"log","a":2,"b":3}`, wantStatus: 400, wantBody: unsupported("log")},
+		{name: "long name for sqrt", body: `{"operation":"squareroot","a":9}`, wantStatus: 400, wantBody: unsupported("squareroot")},
+		{name: "symbol for sqrt", body: `{"operation":"√","a":9}`, wantStatus: 400, wantBody: unsupported("√")},
 		{name: "abbreviated name", body: `{"operation":"pow","a":2,"b":3}`, wantStatus: 400, wantBody: unsupported("pow")},
 		{name: "operator symbol for power", body: `{"operation":"^","a":2,"b":3}`, wantStatus: 400, wantBody: unsupported("^")},
 		{name: "wrong case", body: `{"operation":"ADD","a":10,"b":5}`, wantStatus: 400, wantBody: unsupported("ADD")},
@@ -401,7 +475,7 @@ func TestCalculateValidationOrder(t *testing.T) {
 		{
 			name: "unsupported operation before missing operands", body: `{"operation":"pow"}`,
 			wantStatus: 400,
-			wantBody:   `{"error":"unsupported operation \"pow\": must be one of add, subtract, multiply, divide, power"}`,
+			wantBody:   `{"error":"unsupported operation \"pow\": must be one of add, subtract, multiply, divide, power, sqrt"}`,
 		},
 		{
 			name: "operation type before operand type", body: `{"operation":1,"a":"x","b":2}`,

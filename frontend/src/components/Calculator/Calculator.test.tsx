@@ -66,6 +66,7 @@ describe('Calculator', () => {
       expect(symbols).toMatchObject({
         Clear: 'C',
         'Toggle sign': '±',
+        'Square root': '√',
         Power: '^',
         Divide: '÷',
         Multiply: '×',
@@ -398,6 +399,153 @@ describe('Calculator', () => {
       expect(service).toHaveBeenCalledOnce()
     })
 
+  })
+
+  describe('square root', () => {
+    it('sends the number shown as the only operand, without pressing Equals', () => {
+      const { service } = renderCalculator()
+
+      press('9', 'Square root')
+
+      expect(service).toHaveBeenCalledOnce()
+      expect(service).toHaveBeenCalledWith({ operation: 'sqrt', a: 9 })
+    })
+
+    it('shows a loading state, then the result from the service', async () => {
+      const { resolve } = renderCalculator()
+
+      press('9', 'Square root')
+
+      expect(isLoading()).toBe(true)
+      expect(expression()).toBe('√(9) =')
+
+      await resolve(3)
+
+      expect(isLoading()).toBe(false)
+      expect(value()).toBe('3')
+      expect(expression()).toBe('√(9) =')
+    })
+
+    it('shows what the service returned rather than computing it', async () => {
+      const { resolve } = renderCalculator()
+
+      press('9', 'Square root')
+      await resolve(7)
+
+      expect(value()).toBe('7')
+    })
+
+    it('sends decimal operands', () => {
+      const { service } = renderCalculator()
+
+      press('2', 'Decimal point', '2', '5', 'Square root')
+
+      expect(service).toHaveBeenCalledWith({ operation: 'sqrt', a: 2.25 })
+    })
+
+    it('does not mark any operation as selected', () => {
+      renderCalculator()
+
+      press('9', 'Square root')
+
+      for (const name of ['Add', 'Subtract', 'Multiply', 'Divide', 'Power'] as const) {
+        expect(isSelected(name)).toBe(false)
+      }
+    })
+
+    it('sends a negative operand and shows the error the service reports', async () => {
+      const { service, reject } = renderCalculator()
+
+      press('9', 'Toggle sign', 'Square root')
+
+      expect(service).toHaveBeenCalledWith({ operation: 'sqrt', a: -9 })
+
+      await reject(new CalculationError('Cannot take the square root of a negative number.'))
+
+      expect(alert()).toBe('Cannot take the square root of a negative number.')
+      expect(value()).toBe('-9')
+    })
+
+    it('can be corrected and applied again after an error', async () => {
+      const { service, reject, resolve } = renderCalculator()
+
+      press('9', 'Toggle sign', 'Square root')
+      await reject(new CalculationError('Cannot take the square root of a negative number.'))
+      press('Toggle sign', 'Square root')
+
+      expect(alert()).toBeNull()
+      expect(service).toHaveBeenLastCalledWith({ operation: 'sqrt', a: 9 })
+
+      await resolve(3)
+
+      expect(value()).toBe('3')
+    })
+
+    it('applies to the second operand of a calculation in progress', async () => {
+      const { service, resolve } = renderCalculator()
+
+      press('9', 'Add', '1', '6', 'Square root')
+
+      expect(service).toHaveBeenLastCalledWith({ operation: 'sqrt', a: 16 })
+
+      await resolve(4)
+
+      expect(expression()).toBe('9 + √(16)')
+      expect(value()).toBe('4')
+      expect(isSelected('Add')).toBe(true)
+
+      press('Equals')
+
+      expect(service).toHaveBeenLastCalledWith({ operation: 'add', a: 9, b: 4 })
+      expect(expression()).toBe('9 + 4 =')
+
+      await resolve(13)
+
+      expect(value()).toBe('13')
+    })
+
+    it('can start the next calculation from its result', async () => {
+      const { service, resolve } = renderCalculator()
+
+      press('9', 'Square root')
+      await resolve(3)
+      press('Multiply', '5', 'Equals')
+
+      expect(service).toHaveBeenLastCalledWith({ operation: 'multiply', a: 3, b: 5 })
+    })
+
+    it('can be applied to a previous result', async () => {
+      const { service, resolve } = renderCalculator()
+
+      press('8', '1', 'Square root')
+      await resolve(9)
+      press('Square root')
+
+      expect(service).toHaveBeenLastCalledWith({ operation: 'sqrt', a: 9 })
+    })
+
+    it('is disabled while a calculation is loading', () => {
+      const { service } = renderCalculator()
+
+      press('9', 'Square root')
+
+      expect(key('Square root')).toHaveProperty('disabled', true)
+
+      press('Square root')
+
+      expect(service).toHaveBeenCalledOnce()
+    })
+
+    it('is cleared like any other calculation', async () => {
+      const { resolve } = renderCalculator()
+
+      press('9', 'Square root')
+      await resolve(3)
+      press('Clear')
+
+      expect(value()).toBe('0')
+      expect(expression()).toBe('')
+    })
   })
 
   describe('validation before submitting', () => {

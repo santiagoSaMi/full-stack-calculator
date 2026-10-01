@@ -28,6 +28,7 @@ export function Calculator({ calculate }: CalculatorProps) {
         onDecimal={calculator.inputDecimal}
         onToggleSign={calculator.toggleSign}
         onOperation={calculator.selectOperation}
+        onUnaryOperation={calculator.applyUnaryOperation}
         onSubmit={calculator.submit}
         onClear={calculator.clear}
       />

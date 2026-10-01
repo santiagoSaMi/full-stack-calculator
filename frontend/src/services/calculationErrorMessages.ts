@@ -6,6 +6,7 @@ export const ERROR_MESSAGES = {
   divisionByZero: 'Cannot divide by zero.',
   resultOutOfRange: 'The result is too large to calculate.',
   notRealNumber: 'That calculation has no real-number result.',
+  negativeSquareRoot: 'Cannot take the square root of a negative number.',
   operandOutOfRange: 'That number is too large.',
   unsupportedOperation: 'That operation is not supported.',
   invalidRequest: 'The calculation could not be processed. Check your input and try again.',
@@ -26,6 +27,7 @@ const API_MESSAGE_RULES: ReadonlyArray<{ matches: (apiMessage: string) => boolea
   { matches: (m) => m === 'division by zero', message: ERROR_MESSAGES.divisionByZero },
   { matches: (m) => m === 'result is out of range', message: ERROR_MESSAGES.resultOutOfRange },
   { matches: (m) => m === 'result is not a real number', message: ERROR_MESSAGES.notRealNumber },
+  { matches: (m) => m === 'square root of a negative number', message: ERROR_MESSAGES.negativeSquareRoot },
   { matches: (m) => /^field "[ab]" is out of range$/.test(m), message: ERROR_MESSAGES.operandOutOfRange },
   { matches: (m) => m.startsWith('unsupported operation '), message: ERROR_MESSAGES.unsupportedOperation },
 ]

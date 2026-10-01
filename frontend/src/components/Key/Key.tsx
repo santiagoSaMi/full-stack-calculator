@@ -12,8 +12,6 @@ export interface KeyProps {
   /** Marks a toggle key (e.g. the selected operation) as active. */
   pressed?: boolean
   disabled?: boolean
-  /** Number of grid columns the key spans. */
-  colSpan?: 1 | 2
 }
 
 export function Key({
@@ -23,11 +21,8 @@ export function Key({
   label,
   pressed,
   disabled = false,
-  colSpan = 1,
 }: KeyProps) {
-  const className = ['key', `key--${variant}`, colSpan > 1 && `key--col-span-${colSpan}`]
-    .filter(Boolean)
-    .join(' ')
+  const className = `key key--${variant}`
 
   return (
     <button

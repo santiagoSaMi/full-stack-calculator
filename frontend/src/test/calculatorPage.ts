@@ -9,7 +9,7 @@ import { fireEvent, screen } from '@testing-library/react'
 /** Accessible names of every key, in visual (and Tab) order. */
 export const KEY_NAMES = [
   'Clear',
-  'Toggle sign',
+  'Square root',
   'Power',
   'Divide',
   '7',
@@ -24,6 +24,7 @@ export const KEY_NAMES = [
   '2',
   '3',
   'Add',
+  'Toggle sign',
   '0',
   'Decimal point',
   'Equals',

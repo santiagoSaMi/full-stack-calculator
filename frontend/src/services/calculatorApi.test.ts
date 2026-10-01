@@ -73,6 +73,12 @@ describe('request', () => {
     expect(fetchMock.mock.calls[0]![1]?.body).toBe('{"operation":"power","a":2,"b":10}')
   })
 
+  it('sends a square root request with a single operand and no b', async () => {
+    await calculate({ operation: 'sqrt', a: 9 })
+
+    expect(fetchMock.mock.calls[0]![1]?.body).toBe('{"operation":"sqrt","a":9}')
+  })
+
   it('forwards the abort signal', async () => {
     const { signal } = new AbortController()
 

@@ -9,13 +9,14 @@ import {
   selectExpression,
   selectIsPending,
   validateSubmission,
+  validateUnarySubmission,
   VALIDATION_MESSAGES,
 } from './calculatorReducer.ts'
 import { OPERATIONS } from './operations.ts'
-import type { CalculationRequest, CalculatorAction, CalculatorState, Digit, Operation } from './types.ts'
+import type { BinaryOperation, CalculationRequest, CalculatorAction, CalculatorState, Digit } from './types.ts'
 
 const digit = (d: Digit): CalculatorAction => ({ type: 'inputDigit', digit: d })
-const op = (operation: Operation): CalculatorAction => ({ type: 'selectOperation', operation })
+const op = (operation: BinaryOperation): CalculatorAction => ({ type: 'selectOperation', operation })
 const decimal: CalculatorAction = { type: 'inputDecimal' }
 const sign: CalculatorAction = { type: 'toggleSign' }
 const clear: CalculatorAction = { type: 'clear' }
@@ -397,6 +398,156 @@ describe('after a failed calculation', () => {
 
     expect(selectError(retried)).toBeNull()
     expect(selectDisplayValue(retried)).toBe('4')
+  })
+})
+
+describe('square root', () => {
+  /** Applies the square root to the number shown, with the given request id. */
+  function sqrt(state: CalculatorState, requestId = 1): CalculatorState {
+    const validation = validateUnarySubmission(state, 'sqrt')
+    if (!validation.ok) throw new Error(validation.message)
+    return calculatorReducer(state, { type: 'submit', requestId, request: validation.request })
+  }
+
+  describe('building the request', () => {
+    it.each([
+      ['the number being typed', run(digit('9')), 9],
+      ['a decimal', run(...type('2.25')), 2.25],
+      ['a number with a trailing decimal point', run(...type('16.')), 16],
+      ['the initial zero', run(), 0],
+      ['a previous result', resolve(submit(run(digit('7'), op('add'), digit('9'))), 16), 16],
+      ['the second operand of a calculation in progress', run(digit('9'), op('add'), ...type('16')), 16],
+      ['the first operand when no second one is typed yet', run(digit('9'), op('add')), 9],
+    ])('uses %s as the only operand', (_name, state, a) => {
+      expect(validateUnarySubmission(state, 'sqrt')).toEqual({ ok: true, request: { operation: 'sqrt', a } })
+    })
+
+    it('sends no second operand', () => {
+      const validation = validateUnarySubmission(run(digit('9'), op('add'), digit('4')), 'sqrt')
+
+      expect(validation.ok && 'b' in validation.request).toBe(false)
+    })
+
+    it('does not judge a negative operand, which is the backend\'s decision', () => {
+      expect(validateUnarySubmission(run(...type('-9')), 'sqrt')).toEqual({
+        ok: true,
+        request: { operation: 'sqrt', a: -9 },
+      })
+    })
+
+    it('rejects an operand that is not a finite number', () => {
+      const state: CalculatorState = { ...initialState, currentInput: '1e+999' }
+
+      expect(validateUnarySubmission(state, 'sqrt')).toEqual({
+        ok: false,
+        message: VALIDATION_MESSAGES.invalidNumber,
+      })
+    })
+  })
+
+  describe('on its own', () => {
+    const pending = sqrt(run(digit('9')))
+    const done = resolve(pending, 3)
+
+    it('shows the expression while pending', () => {
+      expect(selectIsPending(pending)).toBe(true)
+      expect(selectExpression(pending)).toBe('√(9) =')
+    })
+
+    it('shows the result', () => {
+      expect(selectDisplayValue(done)).toBe('3')
+      expect(selectExpression(done)).toBe('√(9) =')
+    })
+
+    it('shows a negative operand inside the parentheses', () => {
+      expect(selectExpression(sqrt(run(...type('-9'))))).toBe('√(-9) =')
+    })
+
+    it('starts a new number when a digit is typed', () => {
+      expect(selectDisplayValue(apply(done, digit('5')))).toBe('5')
+    })
+
+    it('uses the result as the first operand of the next calculation', () => {
+      const state = apply(done, op('add'), digit('1'))
+
+      expect(requestOf(state)).toEqual({ operation: 'add', a: 3, b: 1 })
+    })
+
+    it('can be applied again to its own result', () => {
+      expect(validateUnarySubmission(resolve(sqrt(run(...type('81'))), 9), 'sqrt')).toEqual({
+        ok: true,
+        request: { operation: 'sqrt', a: 9 },
+      })
+    })
+
+    it('needs an operation before Equals can be used', () => {
+      expect(validationMessage(done)).toBe(VALIDATION_MESSAGES.missingOperation)
+    })
+  })
+
+  describe('inside a two-operand calculation', () => {
+    const pending = sqrt(run(digit('9'), op('add'), ...type('16')))
+    const done = resolve(pending, 4)
+
+    it('replaces only the second operand with the result', () => {
+      expect(done.firstOperand).toBe('9')
+      expect(done.operation).toBe('add')
+      expect(selectDisplayValue(done)).toBe('4')
+    })
+
+    it('shows the calculation in progress with the square root in it', () => {
+      expect(selectExpression(pending)).toBe('9 + √(16)')
+      expect(selectExpression(done)).toBe('9 + √(16)')
+    })
+
+    it('lets the outer calculation be submitted with the result', () => {
+      expect(requestOf(done)).toEqual({ operation: 'add', a: 9, b: 4 })
+      expect(selectExpression(submit(done, 2))).toBe('9 + 4 =')
+    })
+
+    it('replaces the result when a digit is typed, keeping the outer calculation', () => {
+      const state = apply(done, digit('5'))
+
+      expect(selectExpression(state)).toBe('9 +')
+      expect(requestOf(state)).toEqual({ operation: 'add', a: 9, b: 5 })
+    })
+
+    it('fills in the second operand from the first when none was typed', () => {
+      const state = resolve(sqrt(run(digit('9'), op('multiply'))), 3)
+
+      expect(selectExpression(state)).toBe('9 × √(9)')
+      expect(requestOf(state)).toEqual({ operation: 'multiply', a: 9, b: 3 })
+    })
+  })
+
+  describe('when it fails', () => {
+    const failed = reject(sqrt(run(...type('-9'))), 'Cannot take the square root of a negative number.')
+
+    it('exposes the error and keeps the operand', () => {
+      expect(selectError(failed)).toBe('Cannot take the square root of a negative number.')
+      expect(selectDisplayValue(failed)).toBe('-9')
+    })
+
+    it('keeps a calculation in progress', () => {
+      const state = reject(sqrt(run(digit('5'), op('add'), ...type('-9'))), 'message')
+
+      expect(state.firstOperand).toBe('5')
+      expect(state.operation).toBe('add')
+      expect(selectDisplayValue(state)).toBe('-9')
+    })
+
+    it('can be corrected and applied again', () => {
+      const corrected = apply(failed, sign)
+
+      expect(selectError(corrected)).toBeNull()
+      expect(validateUnarySubmission(corrected, 'sqrt')).toEqual({ ok: true, request: { operation: 'sqrt', a: 9 } })
+    })
+  })
+
+  it('ignores a late response after Clear', () => {
+    const cleared = calculatorReducer(sqrt(run(digit('9'))), clear)
+
+    expect(resolve(cleared, 3)).toBe(cleared)
   })
 })
 

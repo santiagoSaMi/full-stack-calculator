@@ -27,15 +27,21 @@ describe('errors the backend reports about the calculation', () => {
     )
   })
 
+  it('explains a square root of a negative number', () => {
+    expect(userMessageFor(apiError(422, 'square root of a negative number'))).toBe(
+      'Cannot take the square root of a negative number.',
+    )
+  })
+
   it.each(['a', 'b'])('explains operand %s being out of range', (field) => {
     expect(userMessageFor(apiError(400, `field "${field}" is out of range`))).toBe('That number is too large.')
   })
 
   it.each([
-    'unsupported operation "modulo": must be one of add, subtract, multiply, divide, power',
-    'unsupported operation "ADD": must be one of add, subtract, multiply, divide, power',
+    'unsupported operation "modulo": must be one of add, subtract, multiply, divide, power, sqrt',
+    'unsupported operation "ADD": must be one of add, subtract, multiply, divide, power, sqrt',
     // The list of operations in the message may grow; only the prefix matters.
-    'unsupported operation "sqrt": must be one of add, subtract, multiply, divide',
+    'unsupported operation "log": must be one of add, subtract, multiply, divide',
   ])('explains an unsupported operation', (apiMessage) => {
     expect(userMessageFor(apiError(400, apiMessage))).toBe('That operation is not supported.')
   })
@@ -48,6 +54,7 @@ describe('errors the backend reports about the calculation', () => {
 describe('errors about the request itself', () => {
   it.each([
     [400, 'field "a" is required'],
+    [400, 'field "b" is not allowed for operation "sqrt"'],
     [400, 'field "b" must be a number'],
     [400, 'field "operation" must be a string'],
     [400, 'request body contains malformed JSON'],

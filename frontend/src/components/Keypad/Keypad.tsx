@@ -1,16 +1,17 @@
-import { OPERATIONS } from '../../calculator/operations.ts'
-import type { Digit, Operation } from '../../calculator/types.ts'
+import { OPERATIONS, UNARY_OPERATIONS } from '../../calculator/operations.ts'
+import type { BinaryOperation, Digit, UnaryOperation } from '../../calculator/types.ts'
 import { Key } from '../Key/Key.tsx'
 import './Keypad.css'
 
 export interface KeypadProps {
-  activeOperation: Operation | null
+  activeOperation: BinaryOperation | null
   /** Disables every key except Clear, e.g. while a calculation is pending. */
   disabled?: boolean
   onDigit: (digit: Digit) => void
   onDecimal: () => void
   onToggleSign: () => void
-  onOperation: (operation: Operation) => void
+  onOperation: (operation: BinaryOperation) => void
+  onUnaryOperation: (operation: UnaryOperation) => void
   onSubmit: () => void
   onClear: () => void
 }
@@ -22,16 +23,17 @@ export function Keypad({
   onDecimal,
   onToggleSign,
   onOperation,
+  onUnaryOperation,
   onSubmit,
   onClear,
 }: KeypadProps) {
-  const digitKey = (digit: Digit, colSpan: 1 | 2 = 1) => (
-    <Key key={digit} colSpan={colSpan} disabled={disabled} onPress={() => onDigit(digit)}>
+  const digitKey = (digit: Digit) => (
+    <Key key={digit} disabled={disabled} onPress={() => onDigit(digit)}>
       {digit}
     </Key>
   )
 
-  const operationKey = (operation: Operation) => (
+  const operationKey = (operation: BinaryOperation) => (
     <Key
       key={operation}
       variant="operation"
@@ -44,14 +46,25 @@ export function Keypad({
     </Key>
   )
 
+  // Single-operand operations act immediately, so they have no selected state.
+  const unaryOperationKey = (operation: UnaryOperation) => (
+    <Key
+      key={operation}
+      variant="operation"
+      label={UNARY_OPERATIONS[operation].label}
+      disabled={disabled}
+      onPress={() => onUnaryOperation(operation)}
+    >
+      {UNARY_OPERATIONS[operation].symbol}
+    </Key>
+  )
+
   return (
     <div className="keypad">
       <Key variant="function" label="Clear" onPress={onClear}>
         C
       </Key>
-      <Key variant="function" label="Toggle sign" disabled={disabled} onPress={onToggleSign}>
-        ±
-      </Key>
+      {unaryOperationKey('sqrt')}
       {operationKey('power')}
       {operationKey('divide')}
 
@@ -70,7 +83,10 @@ export function Keypad({
       {digitKey('3')}
       {operationKey('add')}
 
-      {digitKey('0', 2)}
+      <Key variant="function" label="Toggle sign" disabled={disabled} onPress={onToggleSign}>
+        ±
+      </Key>
+      {digitKey('0')}
       <Key label="Decimal point" disabled={disabled} onPress={onDecimal}>
         .
       </Key>

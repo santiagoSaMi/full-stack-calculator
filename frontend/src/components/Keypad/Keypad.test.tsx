@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, render } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { Operation } from '../../calculator/types.ts'
+import type { BinaryOperation } from '../../calculator/types.ts'
 import { isSelected, key, KEY_NAMES, press } from '../../test/calculatorPage.ts'
 import type { KeyName } from '../../test/calculatorPage.ts'
 import { Keypad } from './Keypad.tsx'
@@ -15,6 +15,7 @@ function renderKeypad(props: Partial<KeypadProps> = {}) {
     onDecimal: vi.fn(),
     onToggleSign: vi.fn(),
     onOperation: vi.fn(),
+    onUnaryOperation: vi.fn(),
     onSubmit: vi.fn(),
     onClear: vi.fn(),
   }
@@ -32,7 +33,7 @@ describe('Keypad', () => {
     expect(handlers.onDigit).toHaveBeenCalledWith(digit)
   })
 
-  it.each<[KeyName, Operation]>([
+  it.each<[KeyName, BinaryOperation]>([
     ['Add', 'add'],
     ['Subtract', 'subtract'],
     ['Multiply', 'multiply'],
@@ -45,6 +46,23 @@ describe('Keypad', () => {
 
     expect(handlers.onOperation).toHaveBeenCalledOnce()
     expect(handlers.onOperation).toHaveBeenCalledWith(operation)
+  })
+
+  it('reports the Square root key as the "sqrt" operation, and as nothing else', () => {
+    const handlers = renderKeypad()
+
+    press('Square root')
+
+    expect(handlers.onUnaryOperation).toHaveBeenCalledOnce()
+    expect(handlers.onUnaryOperation).toHaveBeenCalledWith('sqrt')
+    expect(handlers.onOperation).not.toHaveBeenCalled()
+    expect(handlers.onSubmit).not.toHaveBeenCalled()
+  })
+
+  it('never shows the Square root key as selected, since it acts immediately', () => {
+    renderKeypad({ activeOperation: 'add' })
+
+    expect(key('Square root').hasAttribute('aria-pressed')).toBe(false)
   })
 
   it.each<[KeyName, 'onDecimal' | 'onToggleSign' | 'onSubmit' | 'onClear']>([
@@ -63,7 +81,7 @@ describe('Keypad', () => {
     }
   })
 
-  it.each<[Operation, KeyName]>([
+  it.each<[BinaryOperation, KeyName]>([
     ['add', 'Add'],
     ['subtract', 'Subtract'],
     ['multiply', 'Multiply'],
@@ -89,6 +107,7 @@ describe('Keypad', () => {
     expect(handlers.onClear).toHaveBeenCalledOnce()
     expect(handlers.onDigit).not.toHaveBeenCalled()
     expect(handlers.onOperation).not.toHaveBeenCalled()
+    expect(handlers.onUnaryOperation).not.toHaveBeenCalled()
     expect(handlers.onSubmit).not.toHaveBeenCalled()
   })
 })

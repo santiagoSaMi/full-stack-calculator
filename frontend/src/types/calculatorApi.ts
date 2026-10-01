@@ -1,11 +1,12 @@
-import type { Operation } from '../calculator/types.ts'
+import type { BinaryOperation, UnaryOperation } from '../calculator/types.ts'
 
-/** Request body of POST /api/v1/calculate. */
-export interface CalculateRequest {
-  operation: Operation
-  a: number
-  b: number
-}
+/**
+ * Request body of POST /api/v1/calculate. Two-operand operations send `a` and
+ * `b`; single-operand operations send only `a`.
+ */
+export type CalculateRequest =
+  | { operation: BinaryOperation; a: number; b: number }
+  | { operation: UnaryOperation; a: number }
 
 /** Response body of a successful POST /api/v1/calculate. */
 export interface CalculateResponse {

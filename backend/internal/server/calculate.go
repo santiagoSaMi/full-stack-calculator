@@ -17,6 +17,7 @@ import (
 const maxRequestBytes = 1 << 10 // 1 KiB
 
 // calculateRequest is a validated request to POST /api/v1/calculate.
+// B is zero for operations that take a single operand.
 type calculateRequest struct {
 	Operation string
 	A, B      float64
@@ -27,20 +28,47 @@ type calculateResponse struct {
 	Result float64 `json:"result"`
 }
 
-// operations maps each supported operation name to its calculator function.
-var operations = map[string]func(a, b float64) (float64, error){
-	"add":      infallible(calculator.Add),
-	"subtract": infallible(calculator.Subtract),
-	"multiply": infallible(calculator.Multiply),
-	"divide":   calculator.Divide,
-	"power":    calculator.Power,
+// operation describes a supported operation: how many operands it takes and
+// the calculator function that performs it.
+type operation struct {
+	// unary is true for operations that take only operand a.
+	unary bool
+	apply func(a, b float64) (float64, error)
 }
 
-// infallible adapts an operation that cannot fail to the common signature.
+// operations maps each supported operation name to its definition.
+var operations = map[string]operation{
+	"add":      {apply: infallible(calculator.Add)},
+	"subtract": {apply: infallible(calculator.Subtract)},
+	"multiply": {apply: infallible(calculator.Multiply)},
+	"divide":   {apply: calculator.Divide},
+	"power":    {apply: calculator.Power},
+	"sqrt":     {unary: true, apply: unary(calculator.Sqrt)},
+}
+
+// supportedOperations lists the operation names in the order shown to clients.
+const supportedOperations = "add, subtract, multiply, divide, power, sqrt"
+
+// infallible adapts a binary operation that cannot fail to the common signature.
 func infallible(fn func(a, b float64) float64) func(a, b float64) (float64, error) {
 	return func(a, b float64) (float64, error) {
 		return fn(a, b), nil
 	}
+}
+
+// unary adapts a single-operand operation to the common signature.
+func unary(fn func(x float64) (float64, error)) func(a, b float64) (float64, error) {
+	return func(a, _ float64) (float64, error) {
+		return fn(a)
+	}
+}
+
+// isCalculationError reports whether err is a calculator error caused by the
+// operands, which clients should be told about.
+func isCalculationError(err error) bool {
+	return errors.Is(err, calculator.ErrDivisionByZero) ||
+		errors.Is(err, calculator.ErrNotRealNumber) ||
+		errors.Is(err, calculator.ErrNegativeSquareRoot)
 }
 
 func handleCalculate(w http.ResponseWriter, r *http.Request) {
@@ -55,8 +83,8 @@ func handleCalculate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := operations[req.Operation](req.A, req.B)
-	if errors.Is(err, calculator.ErrDivisionByZero) || errors.Is(err, calculator.ErrNotRealNumber) {
+	result, err := operations[req.Operation].apply(req.A, req.B)
+	if isCalculationError(err) {
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
@@ -93,7 +121,9 @@ var allowedFields = map[string]bool{"operation": true, "a": true, "b": true}
 //  2. body is a single JSON object (400)
 //  3. no unknown or duplicate fields, matched case-sensitively (400)
 //  4. operation is present, a string, and supported (400)
-//  5. a, then b, are present, numbers, and within float64 range (400)
+//  5. a is present, a number, and within float64 range (400)
+//  6. b likewise, for operations with two operands; for operations with one
+//     operand, b must be absent (400)
 func decodeCalculateRequest(body io.Reader) (calculateRequest, *apiError) {
 	fields, apiErr := readObject(body)
 	if apiErr != nil {
@@ -108,6 +138,15 @@ func decodeCalculateRequest(body io.Reader) (calculateRequest, *apiError) {
 	if apiErr != nil {
 		return calculateRequest{}, apiErr
 	}
+	if operations[op].unary {
+		// Rejected rather than ignored, so a client that sends a second
+		// operand by mistake finds out.
+		if !isNull(fields["b"]) {
+			return calculateRequest{}, badRequest(`field "b" is not allowed for operation %q`, op)
+		}
+		return calculateRequest{Operation: op, A: a}, nil
+	}
+
 	b, apiErr := numberField(fields, "b")
 	if apiErr != nil {
 		return calculateRequest{}, apiErr
@@ -201,7 +240,7 @@ func operationField(fields map[string]json.RawMessage) (string, *apiError) {
 		return "", badRequest(`field "operation" is required`)
 	}
 	if _, ok := operations[op]; !ok {
-		return "", badRequest("unsupported operation %q: must be one of add, subtract, multiply, divide, power", op)
+		return "", badRequest("unsupported operation %q: must be one of %s", op, supportedOperations)
 	}
 	return op, nil
 }

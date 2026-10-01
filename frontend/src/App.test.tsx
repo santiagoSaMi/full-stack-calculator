@@ -111,6 +111,65 @@ describe('App', () => {
     expect(expression()).toBe('2 ^ 10 =')
   })
 
+  describe('square root', () => {
+    it('posts a single-operand request with no b', async () => {
+      const request = pendingRequest()
+      render(<App />)
+
+      press('9', 'Square root')
+
+      expect(fetchMock).toHaveBeenCalledOnce()
+      expect(fetchMock.mock.calls[0]![0]).toBe('/api/v1/calculate')
+      expect(sentBody()).toEqual({ operation: 'sqrt', a: 9 })
+      expect(sentBody()).not.toHaveProperty('b')
+
+      await request.respond(200, { result: 3 })
+
+      expect(value()).toBe('3')
+      expect(expression()).toBe('√(9) =')
+    })
+
+    it('shows a clear message when the API rejects a negative number', async () => {
+      const request = pendingRequest()
+      render(<App />)
+
+      press('9', 'Toggle sign', 'Square root')
+
+      expect(sentBody()).toEqual({ operation: 'sqrt', a: -9 })
+
+      await request.respond(422, { error: 'square root of a negative number' })
+
+      expect(alert()).toBe('Cannot take the square root of a negative number.')
+      expect(value()).toBe('-9')
+    })
+
+    it('feeds its result into a two-operand calculation', async () => {
+      const root = pendingRequest()
+      render(<App />)
+
+      press('9', 'Add', '1', '6', 'Square root')
+      await root.respond(200, { result: 4 })
+
+      const sum = pendingRequest()
+      press('Equals')
+
+      expect(sentBody(1)).toEqual({ operation: 'add', a: 9, b: 4 })
+
+      await sum.respond(200, { result: 13 })
+
+      expect(value()).toBe('13')
+    })
+
+    it('still sends b for every two-operand operation', () => {
+      pendingRequest()
+      render(<App />)
+
+      press('9', 'Add', '4', 'Equals')
+
+      expect(sentBody()).toEqual({ operation: 'add', a: 9, b: 4 })
+    })
+  })
+
   it('sends decimal and negative numbers as JSON numbers', () => {
     pendingRequest()
     render(<App />)
@@ -220,7 +279,7 @@ describe('App', () => {
       [
         'an unsupported operation',
         400,
-        { error: 'unsupported operation "modulo": must be one of add, subtract, multiply, divide, power' },
+        { error: 'unsupported operation "modulo": must be one of add, subtract, multiply, divide, power, sqrt' },
         'That operation is not supported.',
       ],
       [
