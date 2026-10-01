@@ -12,6 +12,7 @@ A calculator with a React + TypeScript frontend and a Go backend. The frontend h
 - [Local setup](#local-setup)
 - [Running the backend](#running-the-backend)
 - [Running the frontend](#running-the-frontend)
+- [Running with Docker](#running-with-docker)
 - [Environment variables](#environment-variables)
 - [API documentation](#api-documentation)
 - [Error handling](#error-handling)
@@ -60,6 +61,8 @@ Vite dev server ── proxies /api ──▶ Go backend (:8080)
 
 In development the browser only talks to the Vite dev server, which forwards `/api` requests to the backend. Requests therefore stay same-origin and the backend needs no CORS configuration.
 
+With Docker, nginx takes the dev server's place: it serves the built frontend and forwards `/api` to the backend container. See [Running with Docker](#running-with-docker).
+
 **Backend layers**
 
 | Package | Responsibility |
@@ -85,7 +88,9 @@ The reasoning behind this structure is in [Design rationale](#design-rationale).
 ```
 .
 ├── README.md
+├── compose.yaml                  builds and runs both containers
 ├── backend/
+│   ├── Dockerfile                multi-stage build: static binary on a minimal base
 │   ├── Makefile                  test, coverage and run targets
 │   ├── go.mod                    no external dependencies
 │   ├── cmd/server/               entry point: port, timeouts, graceful shutdown
@@ -93,6 +98,8 @@ The reasoning behind this structure is in [Design rationale](#design-rationale).
 │       ├── calculator/           arithmetic (no HTTP)
 │       └── server/               routes, validation, JSON responses
 └── frontend/
+    ├── Dockerfile                multi-stage build: Vite build, served by nginx
+    ├── nginx/                    nginx configuration template (static files + /api proxy)
     ├── .env.example              documents the environment variables
     ├── package.json
     ├── vite.config.ts            dev proxy and test coverage configuration
@@ -114,6 +121,7 @@ Tests sit next to the code they test (`*_test.go`, `*.test.ts`, `*.test.tsx`).
 | Go | 1.27.1 or later | As declared in `backend/go.mod`. |
 | Node.js | 22.22 or later in the 22.x line, or 24.15 or later | The range the test tooling supports; includes npm. |
 | make | any | Optional. Only used for the backend shortcuts; the plain `go` commands are listed too. |
+| Docker with Compose | any recent version | Optional. Only needed for [Running with Docker](#running-with-docker), which needs neither Go nor Node.js installed. |
 
 ## Local setup
 
@@ -175,13 +183,72 @@ Other commands:
 | `npm run typecheck` | Type-checks the project, including the tests. |
 | `npm run lint` | Lints the project with oxlint. |
 
+## Running with Docker
+
+Docker runs the application the way it would be deployed: the frontend is built once and served as static files, with no dev server. Neither Go nor Node.js needs to be installed.
+
+From the repository root:
+
+```bash
+docker compose up --build
+```
+
+Open <http://localhost:3000>. To use another port:
+
+```bash
+WEB_PORT=8000 docker compose up --build
+```
+
+Stop with `Ctrl+C`, and remove the containers with `docker compose down`. Add `-d` to `up` to run in the background.
+
+### How it fits together
+
+```
+Browser ──▶ frontend container (nginx, port 8080 → host port 3000)
+               ├─ serves the built static files
+               └─ forwards /api/ ──▶ backend container (Go binary, port 8080)
+```
+
+| Image | Build | Runtime | Size |
+|-------|-------|---------|------|
+| `backend` | `golang:1.27-alpine` compiles a static binary. | `gcr.io/distroless/static-debian12:nonroot`: the binary only, with no shell or package manager, running as a non-root user. | about 16 MB |
+| `frontend` | `node:22-alpine` runs `npm ci` and `npm run build`. | `nginxinc/nginx-unprivileged:1.29-alpine`: the contents of `dist/` and an nginx configuration, running as a non-root user. | about 82 MB |
+
+Both are multi-stage builds, so compilers, `node_modules` and source code stay out of the final images.
+
+- **One origin.** The browser only talks to nginx, which serves the page and forwards `/api/` to the backend. This is the same arrangement as the Vite proxy in development, so the application code is identical in both and the backend needs no CORS setup.
+- **The backend address is a runtime setting.** nginx reads `BACKEND_URL` when the container starts. It is not compiled into the JavaScript bundle, so one frontend image works with any backend address.
+- **The backend is looked up as requests arrive**, not once when nginx starts. If the backend container is recreated with a new address, nginx finds it again within about 10 seconds, and the frontend container can start before the backend exists.
+- **The backend is not published to the host.** It is reachable only through nginx, on the network Compose creates.
+- **The backend's `/health` endpoint is not exposed through nginx**, which forwards only `/api/`.
+
+### Without Compose
+
+```bash
+docker build -t calculator-backend ./backend
+docker build -t calculator-frontend ./frontend
+
+docker network create calculator
+docker run -d --name backend --network calculator calculator-backend
+docker run -d --name frontend --network calculator -p 3000:8080 \
+  -e BACKEND_URL=http://backend:8080 calculator-frontend
+```
+
+`BACKEND_URL` must be a URL the nginx container can reach, with no trailing slash and no path.
+
+### What Compose is not used for
+
+Compose runs the built application. For day-to-day development with hot reload, run the backend and the Vite dev server directly, as described above.
+
 ## Environment variables
 
 | Variable | Used by | Default | Purpose |
 |----------|---------|---------|---------|
 | `PORT` | Backend | `8080` | Port the API listens on. |
-| `VITE_API_BASE_URL` | Frontend (build time) | empty | Base URL of the API. Empty means the same origin as the page, which is what the dev proxy expects. |
+| `VITE_API_BASE_URL` | Frontend (build time; a build argument in the frontend image) | empty | Base URL of the API. Empty means the same origin as the page, which is what the dev proxy and the nginx proxy expect. |
 | `API_PROXY_TARGET` | Vite dev and preview servers | `http://localhost:8080` | Where `/api` requests are forwarded. Not read by the app itself. |
+| `BACKEND_URL` | Frontend container (nginx, at start-up) | `http://backend:8080` | Where nginx forwards `/api/` requests. No trailing slash. |
+| `WEB_PORT` | `compose.yaml` | `3000` | Host port the application is published on. |
 
 `frontend/.env.example` documents the frontend variables. No variable is required for local development.
 
@@ -494,6 +561,7 @@ Tests enforce the rule: they make the mocked API answer `2 + 2` with `5` and che
 - **No keyboard number entry.** The keys can be focused and pressed with the keyboard, but typing digits on the keyboard does not enter them.
 - **No calculation history, and no memory keys.**
 - **One operation at a time.** Selecting a new operation when both numbers are entered switches the operation; it does not evaluate the pending one first.
-- **No production deployment setup.** The `/api` proxy exists only in Vite's dev and preview servers, the backend does not serve the frontend, and it sends no CORS headers. Deploying needs a reverse proxy that serves both under one origin, or CORS support in the backend.
+- **The Docker setup is a starting point for deployment, not a complete one.** It has no HTTPS, no container health check for the backend (its image has no shell to run one), and no resource limits or orchestration.
+- **No CORS support.** The backend sends no CORS headers, so the frontend and the API must be served from one origin, as the dev proxy and the nginx container both arrange.
 - **64-bit floating point.** Numbers are IEEE 754 doubles on both sides, so results have about 15 to 17 significant digits.
 - **No authentication or rate limiting.**

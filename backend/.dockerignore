@@ -1,0 +1,9 @@
+# Keep the build context to the source the build needs.
+Dockerfile
+.dockerignore
+Makefile
+bin/
+coverage.out
+coverage.html
+*.test
+*.out

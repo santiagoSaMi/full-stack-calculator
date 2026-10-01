@@ -1,0 +1,34 @@
+# Builds and runs the whole application:
+#
+#   docker compose up --build
+#
+# then open http://localhost:3000 (set WEB_PORT to use another port).
+
+name: full-stack-calculator
+
+services:
+  # The Go API. Not published to the host: it is reached through the
+  # frontend's /api proxy, on the network Compose creates for the project.
+  backend:
+    build: ./backend
+    environment:
+      PORT: "8080"
+    expose:
+      - "8080"
+
+  # nginx: serves the built frontend and forwards /api to the backend.
+  frontend:
+    build: ./frontend
+    environment:
+      # The backend's address on the Compose network (its service name).
+      BACKEND_URL: http://backend:8080
+    ports:
+      - "${WEB_PORT:-3000}:8080"
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
