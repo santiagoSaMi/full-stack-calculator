@@ -66,6 +66,7 @@ describe('Calculator', () => {
       expect(symbols).toMatchObject({
         Clear: 'C',
         'Toggle sign': '±',
+        Power: '^',
         Divide: '÷',
         Multiply: '×',
         Subtract: '−',
@@ -81,7 +82,7 @@ describe('Calculator', () => {
       for (const name of KEY_NAMES) {
         expect(key(name)).toHaveProperty('disabled', false)
       }
-      for (const name of ['Add', 'Subtract', 'Multiply', 'Divide'] as const) {
+      for (const name of ['Add', 'Subtract', 'Multiply', 'Divide', 'Power'] as const) {
         expect(isSelected(name)).toBe(false)
       }
     })
@@ -167,6 +168,7 @@ describe('Calculator', () => {
       ['Subtract', '8 −'],
       ['Multiply', '8 ×'],
       ['Divide', '8 ÷'],
+      ['Power', '8 ^'],
     ])('shows the operation in the expression when %s is pressed', (name, shown) => {
       renderCalculator()
 
@@ -185,6 +187,7 @@ describe('Calculator', () => {
       expect(isSelected('Add')).toBe(false)
       expect(isSelected('Subtract')).toBe(false)
       expect(isSelected('Divide')).toBe(false)
+      expect(isSelected('Power')).toBe(false)
     })
 
     it('switches to another operation before the second operand is typed', () => {
@@ -294,6 +297,7 @@ describe('Calculator', () => {
       ['Subtract', 'subtract'],
       ['Multiply', 'multiply'],
       ['Divide', 'divide'],
+      ['Power', 'power'],
     ])('sends the %s key as the "%s" operation', (keyName, operation) => {
       const { service } = deferredService()
       render(<Calculator calculate={service} />)
@@ -301,6 +305,35 @@ describe('Calculator', () => {
       press('8', keyName, '2', 'Equals')
 
       expect(service).toHaveBeenCalledWith({ operation, a: 8, b: 2 })
+    })
+
+    it('sends a power with the base first and the exponent second', async () => {
+      const { service, resolve } = deferredService()
+      render(<Calculator calculate={service} />)
+
+      press('2', 'Power', '1', '0', 'Equals')
+
+      expect(service).toHaveBeenCalledWith({ operation: 'power', a: 2, b: 10 })
+      expect(expression()).toBe('2 ^ 10 =')
+
+      await resolve(1024)
+
+      expect(value()).toBe('1024')
+    })
+
+    it('shows a negative base in parentheses so the expression is unambiguous', async () => {
+      const { service, resolve } = deferredService()
+      render(<Calculator calculate={service} />)
+
+      press('2', 'Toggle sign', 'Power')
+      expect(expression()).toBe('(-2) ^')
+
+      press('2', 'Equals')
+      await resolve(4)
+
+      expect(service).toHaveBeenCalledWith({ operation: 'power', a: -2, b: 2 })
+      expect(expression()).toBe('(-2) ^ 2 =')
+      expect(value()).toBe('4')
     })
 
     it('sends decimal and negative operands', () => {

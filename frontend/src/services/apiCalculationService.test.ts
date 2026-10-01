@@ -47,7 +47,7 @@ describe('apiCalculationService', () => {
       'an unsupported operation',
       new CalculatorApiError('http', 'unsupported operation "pow"', {
         status: 400,
-        apiMessage: 'unsupported operation "pow": must be one of add, subtract, multiply, divide',
+        apiMessage: 'unsupported operation "pow": must be one of add, subtract, multiply, divide, power',
       }),
       'That operation is not supported.',
     ],

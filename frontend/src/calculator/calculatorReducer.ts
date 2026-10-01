@@ -176,10 +176,19 @@ export function selectExpression(state: CalculatorState): string {
   const { calculation } = state
   if (calculation.status === 'pending' || calculation.status === 'success') {
     const { a, b, operation } = calculation.request
-    return `${formatNumber(a)} ${OPERATIONS[operation].symbol} ${formatNumber(b)} =`
+    return `${formatLeftOperand(formatNumber(a), operation)} ${OPERATIONS[operation].symbol} ${formatNumber(b)} =`
   }
   if (state.firstOperand === null || state.operation === null) return ''
-  return `${state.firstOperand} ${OPERATIONS[state.operation].symbol}`
+  return `${formatLeftOperand(state.firstOperand, state.operation)} ${OPERATIONS[state.operation].symbol}`
+}
+
+/**
+ * Wraps a negative base of a power in parentheses. Written without them,
+ * "-2 ^ 2" conventionally means -(2 ^ 2) = -4, but the calculator raises the
+ * whole operand: (-2) ^ 2 = 4.
+ */
+function formatLeftOperand(operand: string, operation: Operation): string {
+  return operation === 'power' && operand.startsWith('-') ? `(${operand})` : operand
 }
 
 /** Text for the display's main line: the operand being typed, or the result. */

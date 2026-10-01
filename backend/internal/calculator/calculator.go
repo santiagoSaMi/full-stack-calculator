@@ -2,10 +2,20 @@
 // calculator service. It has no knowledge of HTTP or any other transport.
 package calculator
 
-import "errors"
+import (
+	"errors"
+	"math"
+)
 
-// ErrDivisionByZero is returned by Divide when the divisor is zero.
+// ErrDivisionByZero is returned when an operation would divide by zero:
+// by Divide when the divisor is zero, and by Power when zero is raised to a
+// negative exponent.
 var ErrDivisionByZero = errors.New("division by zero")
+
+// ErrNotRealNumber is returned by Power when the result is not a real
+// number, which happens when a negative base is raised to a fractional
+// exponent.
+var ErrNotRealNumber = errors.New("result is not a real number")
 
 // Add returns the sum of a and b.
 func Add(a, b float64) float64 {
@@ -29,4 +39,19 @@ func Divide(a, b float64) (float64, error) {
 		return 0, ErrDivisionByZero
 	}
 	return a / b, nil
+}
+
+// Power returns base raised to exponent.
+//
+// It returns ErrDivisionByZero if base is zero and exponent is negative
+// (0^-n is 1/0^n), and ErrNotRealNumber if base is negative and exponent is
+// not an integer. Zero raised to zero is 1, following the usual convention.
+func Power(base, exponent float64) (float64, error) {
+	if base == 0 && exponent < 0 {
+		return 0, ErrDivisionByZero
+	}
+	if base < 0 && exponent != math.Trunc(exponent) {
+		return 0, ErrNotRealNumber
+	}
+	return math.Pow(base, exponent), nil
 }

@@ -67,6 +67,12 @@ describe('request', () => {
     expect(fetchMock.mock.calls[0]![1]?.body).toBe('{"operation":"divide","a":-7.5,"b":0.25}')
   })
 
+  it('sends a power request with the base as a and the exponent as b', async () => {
+    await calculate({ operation: 'power', a: 2, b: 10 })
+
+    expect(fetchMock.mock.calls[0]![1]?.body).toBe('{"operation":"power","a":2,"b":10}')
+  })
+
   it('forwards the abort signal', async () => {
     const { signal } = new AbortController()
 

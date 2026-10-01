@@ -12,4 +12,5 @@ export const OPERATIONS: Record<Operation, OperationInfo> = {
   subtract: { symbol: '−', label: 'Subtract' },
   multiply: { symbol: '×', label: 'Multiply' },
   divide: { symbol: '÷', label: 'Divide' },
+  power: { symbol: '^', label: 'Power' },
 }

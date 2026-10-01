@@ -33,6 +33,7 @@ var operations = map[string]func(a, b float64) (float64, error){
 	"subtract": infallible(calculator.Subtract),
 	"multiply": infallible(calculator.Multiply),
 	"divide":   calculator.Divide,
+	"power":    calculator.Power,
 }
 
 // infallible adapts an operation that cannot fail to the common signature.
@@ -55,7 +56,7 @@ func handleCalculate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := operations[req.Operation](req.A, req.B)
-	if errors.Is(err, calculator.ErrDivisionByZero) {
+	if errors.Is(err, calculator.ErrDivisionByZero) || errors.Is(err, calculator.ErrNotRealNumber) {
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
@@ -200,7 +201,7 @@ func operationField(fields map[string]json.RawMessage) (string, *apiError) {
 		return "", badRequest(`field "operation" is required`)
 	}
 	if _, ok := operations[op]; !ok {
-		return "", badRequest("unsupported operation %q: must be one of add, subtract, multiply, divide", op)
+		return "", badRequest("unsupported operation %q: must be one of add, subtract, multiply, divide, power", op)
 	}
 	return op, nil
 }

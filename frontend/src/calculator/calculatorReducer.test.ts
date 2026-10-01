@@ -11,6 +11,7 @@ import {
   validateSubmission,
   VALIDATION_MESSAGES,
 } from './calculatorReducer.ts'
+import { OPERATIONS } from './operations.ts'
 import type { CalculationRequest, CalculatorAction, CalculatorState, Digit, Operation } from './types.ts'
 
 const digit = (d: Digit): CalculatorAction => ({ type: 'inputDigit', digit: d })
@@ -121,8 +122,38 @@ describe('selecting an operation', () => {
     ['subtract', '−'],
     ['multiply', '×'],
     ['divide', '÷'],
+    ['power', '^'],
   ] as const)('shows the symbol for %s', (operation, symbol) => {
     expect(selectExpression(run(digit('1'), op(operation)))).toBe(`1 ${symbol}`)
+  })
+
+  it('shows a negative base of a power in parentheses', () => {
+    const entering = run(...type('-2'), op('power'))
+    const pending = submit(apply(entering, digit('2')))
+
+    expect(selectExpression(entering)).toBe('(-2) ^')
+    expect(selectExpression(pending)).toBe('(-2) ^ 2 =')
+    expect(selectExpression(resolve(pending, 4))).toBe('(-2) ^ 2 =')
+  })
+
+  it('does not add parentheses to a positive base or a negative exponent', () => {
+    const pending = submit(run(digit('2'), op('power'), ...type('-2')))
+
+    expect(selectExpression(pending)).toBe('2 ^ -2 =')
+  })
+
+  it.each(['add', 'subtract', 'multiply', 'divide'] as const)(
+    'does not add parentheses to a negative first operand of %s',
+    (operation) => {
+      expect(selectExpression(run(...type('-2'), op(operation)))).toBe(`-2 ${OPERATIONS[operation].symbol}`)
+    },
+  )
+
+  it('updates the parentheses when the operation is switched', () => {
+    const state = run(...type('-2'), op('add'), op('power'))
+
+    expect(selectExpression(state)).toBe('(-2) ^')
+    expect(selectExpression(apply(state, op('multiply')))).toBe('-2 ×')
   })
 
   it('drops a trailing decimal point from the first operand', () => {
@@ -166,6 +197,18 @@ describe('validating the submission', () => {
     const state = run(...type('12'), op('add'), digit('3'))
 
     expect(validateSubmission(state)).toEqual({ ok: true, request: { operation: 'add', a: 12, b: 3 } })
+  })
+
+  it('builds a power request with the base first and the exponent second', () => {
+    const state = run(digit('2'), op('power'), ...type('10'))
+
+    expect(requestOf(state)).toEqual({ operation: 'power', a: 2, b: 10 })
+  })
+
+  it('does not judge powers the backend rejects, such as a negative base with a fractional exponent', () => {
+    const state = run(...type('-4'), op('power'), ...type('0.5'))
+
+    expect(validateSubmission(state)).toEqual({ ok: true, request: { operation: 'power', a: -4, b: 0.5 } })
   })
 
   it('converts decimal and negative operands to numbers', () => {

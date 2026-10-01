@@ -21,13 +21,21 @@ describe('errors the backend reports about the calculation', () => {
     expect(userMessageFor(apiError(422, 'result is out of range'))).toBe('The result is too large to calculate.')
   })
 
+  it('explains a power that has no real-number result', () => {
+    expect(userMessageFor(apiError(422, 'result is not a real number'))).toBe(
+      'That calculation has no real-number result.',
+    )
+  })
+
   it.each(['a', 'b'])('explains operand %s being out of range', (field) => {
     expect(userMessageFor(apiError(400, `field "${field}" is out of range`))).toBe('That number is too large.')
   })
 
   it.each([
-    'unsupported operation "modulo": must be one of add, subtract, multiply, divide',
-    'unsupported operation "ADD": must be one of add, subtract, multiply, divide',
+    'unsupported operation "modulo": must be one of add, subtract, multiply, divide, power',
+    'unsupported operation "ADD": must be one of add, subtract, multiply, divide, power',
+    // The list of operations in the message may grow; only the prefix matters.
+    'unsupported operation "sqrt": must be one of add, subtract, multiply, divide',
   ])('explains an unsupported operation', (apiMessage) => {
     expect(userMessageFor(apiError(400, apiMessage))).toBe('That operation is not supported.')
   })

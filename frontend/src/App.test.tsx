@@ -87,6 +87,7 @@ describe('App', () => {
     ['Subtract', 'subtract'],
     ['Multiply', 'multiply'],
     ['Divide', 'divide'],
+    ['Power', 'power'],
   ] as const)('sends the %s key as the "%s" operation', (name, operation) => {
     pendingRequest()
     render(<App />)
@@ -94,6 +95,20 @@ describe('App', () => {
     press('9', name, '3', 'Equals')
 
     expect(sentBody()).toEqual({ operation, a: 9, b: 3 })
+  })
+
+  it('calculates a power through the API', async () => {
+    const request = pendingRequest()
+    render(<App />)
+
+    press('2', 'Power', '1', '0', 'Equals')
+
+    expect(sentBody()).toEqual({ operation: 'power', a: 2, b: 10 })
+
+    await request.respond(200, { result: 1024 })
+
+    expect(value()).toBe('1024')
+    expect(expression()).toBe('2 ^ 10 =')
   })
 
   it('sends decimal and negative numbers as JSON numbers', () => {
@@ -195,11 +210,17 @@ describe('App', () => {
   describe('API errors', () => {
     it.each([
       ['division by zero', 422, { error: 'division by zero' }, 'Cannot divide by zero.'],
+      [
+        'a power with no real-number result',
+        422,
+        { error: 'result is not a real number' },
+        'That calculation has no real-number result.',
+      ],
       ['a result out of range', 422, { error: 'result is out of range' }, 'The result is too large to calculate.'],
       [
         'an unsupported operation',
         400,
-        { error: 'unsupported operation "modulo": must be one of add, subtract, multiply, divide' },
+        { error: 'unsupported operation "modulo": must be one of add, subtract, multiply, divide, power' },
         'That operation is not supported.',
       ],
       [

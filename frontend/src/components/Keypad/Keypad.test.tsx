@@ -37,6 +37,7 @@ describe('Keypad', () => {
     ['Subtract', 'subtract'],
     ['Multiply', 'multiply'],
     ['Divide', 'divide'],
+    ['Power', 'power'],
   ])('reports the %s key as the "%s" operation', (name, operation) => {
     const handlers = renderKeypad()
 
@@ -67,10 +68,11 @@ describe('Keypad', () => {
     ['subtract', 'Subtract'],
     ['multiply', 'Multiply'],
     ['divide', 'Divide'],
+    ['power', 'Power'],
   ])('marks only the active operation "%s" as selected', (operation, name) => {
     renderKeypad({ activeOperation: operation })
 
-    for (const candidate of ['Add', 'Subtract', 'Multiply', 'Divide'] as const) {
+    for (const candidate of ['Add', 'Subtract', 'Multiply', 'Divide', 'Power'] as const) {
       expect(isSelected(candidate)).toBe(candidate === name)
     }
   })

@@ -161,6 +161,39 @@ func TestCalculateDivision(t *testing.T) {
 	})
 }
 
+func TestCalculatePower(t *testing.T) {
+	const (
+		divisionByZero = `{"error":"division by zero"}`
+		notReal        = `{"error":"result is not a real number"}`
+		outOfRange     = `{"error":"result is out of range"}`
+	)
+	runAPICases(t, []apiCase{
+		{name: "positive", body: `{"operation":"power","a":2,"b":10}`, wantStatus: 200, wantBody: `{"result":1024}`},
+		{name: "exponent of zero", body: `{"operation":"power","a":5,"b":0}`, wantStatus: 200, wantBody: `{"result":1}`},
+		{name: "zero to zero", body: `{"operation":"power","a":0,"b":0}`, wantStatus: 200, wantBody: `{"result":1}`},
+		{name: "zero base", body: `{"operation":"power","a":0,"b":3}`, wantStatus: 200, wantBody: `{"result":0}`},
+		{name: "negative exponent", body: `{"operation":"power","a":2,"b":-2}`, wantStatus: 200, wantBody: `{"result":0.25}`},
+		{name: "negative base, even exponent", body: `{"operation":"power","a":-2,"b":2}`, wantStatus: 200, wantBody: `{"result":4}`},
+		{name: "negative base, odd exponent", body: `{"operation":"power","a":-2,"b":3}`, wantStatus: 200, wantBody: `{"result":-8}`},
+		{name: "square root", body: `{"operation":"power","a":9,"b":0.5}`, wantStatus: 200, wantBody: `{"result":3}`},
+		{name: "decimal base", body: `{"operation":"power","a":1.5,"b":2}`, wantStatus: 200, wantBody: `{"result":2.25}`},
+		{name: "zero to a negative exponent", body: `{"operation":"power","a":0,"b":-1}`, wantStatus: 422, wantBody: divisionByZero},
+		{name: "negative base, fractional exponent", body: `{"operation":"power","a":-4,"b":0.5}`, wantStatus: 422, wantBody: notReal},
+		{name: "overflow", body: `{"operation":"power","a":10,"b":400}`, wantStatus: 422, wantBody: outOfRange},
+		{name: "negative overflow", body: `{"operation":"power","a":-10,"b":401}`, wantStatus: 422, wantBody: outOfRange},
+		{name: "underflow to zero", body: `{"operation":"power","a":10,"b":-400}`, wantStatus: 200, wantBody: `{"result":0}`},
+		{
+			name: "missing exponent", body: `{"operation":"power","a":2}`,
+			wantStatus: 400, wantBody: `{"error":"field \"b\" is required"}`,
+		},
+		{
+			name: "wrong case", body: `{"operation":"Power","a":2,"b":3}`,
+			wantStatus: 400,
+			wantBody:   `{"error":"unsupported operation \"Power\": must be one of add, subtract, multiply, divide, power"}`,
+		},
+	})
+}
+
 func TestCalculateDivisionByZero(t *testing.T) {
 	const want = `{"error":"division by zero"}`
 	runAPICases(t, []apiCase{
@@ -174,11 +207,13 @@ func TestCalculateDivisionByZero(t *testing.T) {
 
 func TestCalculateUnsupportedOperation(t *testing.T) {
 	unsupported := func(op string) string {
-		return `{"error":"unsupported operation \"` + op + `\": must be one of add, subtract, multiply, divide"}`
+		return `{"error":"unsupported operation \"` + op + `\": must be one of add, subtract, multiply, divide, power"}`
 	}
 	runAPICases(t, []apiCase{
 		{name: "unknown name", body: `{"operation":"modulo","a":10,"b":5}`, wantStatus: 400, wantBody: unsupported("modulo")},
-		{name: "advanced operation", body: `{"operation":"power","a":2,"b":3}`, wantStatus: 400, wantBody: unsupported("power")},
+		{name: "advanced operation", body: `{"operation":"sqrt","a":2,"b":3}`, wantStatus: 400, wantBody: unsupported("sqrt")},
+		{name: "abbreviated name", body: `{"operation":"pow","a":2,"b":3}`, wantStatus: 400, wantBody: unsupported("pow")},
+		{name: "operator symbol for power", body: `{"operation":"^","a":2,"b":3}`, wantStatus: 400, wantBody: unsupported("^")},
 		{name: "wrong case", body: `{"operation":"ADD","a":10,"b":5}`, wantStatus: 400, wantBody: unsupported("ADD")},
 		{name: "operator symbol", body: `{"operation":"+","a":10,"b":5}`, wantStatus: 400, wantBody: unsupported("+")},
 		{name: "surrounding spaces", body: `{"operation":" add ","a":10,"b":5}`, wantStatus: 400, wantBody: unsupported(" add ")},
@@ -366,7 +401,7 @@ func TestCalculateValidationOrder(t *testing.T) {
 		{
 			name: "unsupported operation before missing operands", body: `{"operation":"pow"}`,
 			wantStatus: 400,
-			wantBody:   `{"error":"unsupported operation \"pow\": must be one of add, subtract, multiply, divide"}`,
+			wantBody:   `{"error":"unsupported operation \"pow\": must be one of add, subtract, multiply, divide, power"}`,
 		},
 		{
 			name: "operation type before operand type", body: `{"operation":1,"a":"x","b":2}`,

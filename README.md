@@ -40,9 +40,11 @@ Request (`Content-Type: application/json`, max 1 KiB):
 
 | Field       | Type   | Rules                                                          |
 |-------------|--------|----------------------------------------------------------------|
-| `operation` | string | Required. One of `add`, `subtract`, `multiply`, `divide` (lowercase, exact). |
-| `a`         | number | Required. Must fit in a 64-bit float.                          |
-| `b`         | number | Required. Must fit in a 64-bit float.                          |
+| `operation` | string | Required. One of `add`, `subtract`, `multiply`, `divide`, `power` (lowercase, exact). |
+| `a`         | number | Required. Must fit in a 64-bit float. For `power`, the base.   |
+| `b`         | number | Required. Must fit in a 64-bit float. For `power`, the exponent. |
+
+`power` computes `a` raised to `b`; `0` raised to `0` is `1`.
 
 Field names are case-sensitive. Unknown and duplicate fields are rejected. `null` is treated as missing.
 
@@ -60,7 +62,7 @@ Every error under `/api/` is returned as JSON with `Content-Type: application/js
 { "error": "division by zero" }
 ```
 
-The `error` string describes the problem in technical terms. Clients should branch on the HTTP status code and choose their own wording for end users. The bundled frontend never shows this text directly: it translates each failure into a user-facing message in `frontend/src/services/calculationErrorMessages.ts`, using the status code and, for the few cases that deserve specific wording (`division by zero`, `result is out of range`, `field "<name>" is out of range`, `unsupported operation …`), the exact text below. Changing those texts therefore requires updating that file.
+The `error` string describes the problem in technical terms. Clients should branch on the HTTP status code and choose their own wording for end users. The bundled frontend never shows this text directly: it translates each failure into a user-facing message in `frontend/src/services/calculationErrorMessages.ts`, using the status code and, for the few cases that deserve specific wording (`division by zero`, `result is not a real number`, `result is out of range`, `field "<name>" is out of range`, `unsupported operation …`), the exact text below. Changing those texts therefore requires updating that file.
 
 Requests are validated in the order below, and only the **first** failing check is reported. Checks 3–7 run while the body is read, so whichever problem appears first in the body wins (e.g. an oversized body with a syntax error near the start is reported as malformed JSON). Checks 8 onward run only once the whole body has been read and is valid JSON.
 
@@ -77,12 +79,13 @@ Requests are validated in the order below, and only the **first** failing check 
 | 9 | No duplicate fields | `400` | `request body contains duplicate field "<name>"` |
 | 10 | `operation` is present and non-empty | `400` | `field "operation" is required` |
 | 11 | `operation` is a string | `400` | `field "operation" must be a string` |
-| 12 | `operation` is supported | `400` | `unsupported operation "<op>": must be one of add, subtract, multiply, divide` |
+| 12 | `operation` is supported | `400` | `unsupported operation "<op>": must be one of add, subtract, multiply, divide, power` |
 | 13 | `a`, then `b`, is present | `400` | `field "<name>" is required` |
 | 14 | `a`, then `b`, is a number | `400` | `field "<name>" must be a number` |
 | 15 | `a`, then `b`, fits in a 64-bit float | `400` | `field "<name>" is out of range` |
-| 16 | Divisor is not zero | `422` | `division by zero` |
-| 17 | Result is finite | `422` | `result is out of range` |
+| 16 | Divisor is not zero (`divide`), and zero is not raised to a negative exponent (`power`) | `422` | `division by zero` |
+| 17 | A negative base is not raised to a fractional exponent (`power`) | `422` | `result is not a real number` |
+| 18 | Result is finite | `422` | `result is out of range` |
 
 Other responses:
 

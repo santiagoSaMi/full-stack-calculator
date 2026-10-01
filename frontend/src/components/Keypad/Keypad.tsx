@@ -46,12 +46,13 @@ export function Keypad({
 
   return (
     <div className="keypad">
-      <Key variant="function" label="Clear" colSpan={2} onPress={onClear}>
+      <Key variant="function" label="Clear" onPress={onClear}>
         C
       </Key>
       <Key variant="function" label="Toggle sign" disabled={disabled} onPress={onToggleSign}>
         ±
       </Key>
+      {operationKey('power')}
       {operationKey('divide')}
 
       {digitKey('7')}

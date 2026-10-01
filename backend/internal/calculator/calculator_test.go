@@ -181,6 +181,103 @@ func TestDivideByZero(t *testing.T) {
 	}
 }
 
+func TestPower(t *testing.T) {
+	tests := []binaryCase{
+		// Positive values.
+		{"square", 3, 2, 9},
+		{"cube", 2, 3, 8},
+		{"large exponent", 2, 10, 1024},
+		{"exponent of one", 7, 1, 7},
+		{"base of one", 1, 99, 1},
+		{"large result", 10, 15, 1e15},
+
+		// Zero values.
+		{"exponent of zero", 5, 0, 1},
+		{"negative base to zero", -5, 0, 1},
+		{"zero to a positive exponent", 0, 3, 0},
+		{"zero to zero", 0, 0, 1},
+
+		// Negative values.
+		{"negative base, even exponent", -2, 2, 4},
+		{"negative base, odd exponent", -2, 3, -8},
+		{"negative exponent", 2, -1, 0.5},
+		{"negative exponent, larger", 2, -3, 0.125},
+		{"negative base and exponent", -2, -2, 0.25},
+		{"negative base, odd negative exponent", -2, -3, -0.125},
+
+		// Decimal values.
+		{"square root", 9, 0.5, 3},
+		{"cube root", 27, 1.0 / 3, 3},
+		{"decimal base", 1.5, 2, 2.25},
+		{"decimal base and exponent", 0.25, 0.5, 0.5},
+		{"negative decimal base, integer exponent", -1.5, 2, 2.25},
+		{"decimal exponent written as integer", 2, 3.0, 8},
+		{"inexact decimal result", 2, 0.5, math.Sqrt2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Power(tt.a, tt.b)
+			if err != nil {
+				t.Fatalf("Power(%v, %v) unexpected error: %v", tt.a, tt.b, err)
+			}
+			if !approxEqual(got, tt.want) {
+				t.Errorf("Power(%v, %v) = %v, want %v", tt.a, tt.b, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPowerErrors(t *testing.T) {
+	negativeZero := math.Copysign(0, -1)
+	tests := []struct {
+		name    string
+		a, b    float64
+		wantErr error
+	}{
+		{"zero to a negative exponent", 0, -1, ErrDivisionByZero},
+		{"zero to a negative decimal exponent", 0, -0.5, ErrDivisionByZero},
+		{"negative zero to a negative exponent", negativeZero, -3, ErrDivisionByZero},
+		{"negative base, square root", -4, 0.5, ErrNotRealNumber},
+		{"negative base, decimal exponent", -8, 1.5, ErrNotRealNumber},
+		{"negative base, negative decimal exponent", -2, -0.5, ErrNotRealNumber},
+		{"negative decimal base, decimal exponent", -0.5, 0.1, ErrNotRealNumber},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Power(tt.a, tt.b)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("Power(%v, %v) error = %v, want %v", tt.a, tt.b, err, tt.wantErr)
+			}
+			if got != 0 {
+				t.Errorf("Power(%v, %v) = %v, want 0 on error", tt.a, tt.b, got)
+			}
+		})
+	}
+}
+
+// TestPowerNeverReturnsNaN checks that every input that would make math.Pow
+// return NaN is reported as an error instead.
+func TestPowerNeverReturnsNaN(t *testing.T) {
+	values := []float64{-8, -2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2, 8}
+	for _, base := range values {
+		for _, exponent := range values {
+			got, err := Power(base, exponent)
+			if err == nil && math.IsNaN(got) {
+				t.Errorf("Power(%v, %v) = NaN without an error", base, exponent)
+			}
+			if err == nil && math.IsInf(got, 0) {
+				t.Errorf("Power(%v, %v) = %v without an error", base, exponent, got)
+			}
+		}
+	}
+}
+
+func TestErrorMessages(t *testing.T) {
+	if got, want := ErrNotRealNumber.Error(), "result is not a real number"; got != want {
+		t.Errorf("ErrNotRealNumber.Error() = %q, want %q", got, want)
+	}
+}
+
 func TestErrDivisionByZeroMessage(t *testing.T) {
 	if got, want := ErrDivisionByZero.Error(), "division by zero"; got != want {
 		t.Errorf("ErrDivisionByZero.Error() = %q, want %q", got, want)

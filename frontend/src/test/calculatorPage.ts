@@ -10,6 +10,7 @@ import { fireEvent, screen } from '@testing-library/react'
 export const KEY_NAMES = [
   'Clear',
   'Toggle sign',
+  'Power',
   'Divide',
   '7',
   '8',
