@@ -4,7 +4,8 @@ const CALCULATE_PATH = '/api/v1/calculate'
 
 /**
  * Why a call to the calculator API failed:
- * - `network`: the request never got a response (offline, server down, CORS).
+ * - `network`: the request never got a response (offline, server down, CORS,
+ *   timeout).
  * - `http`: the server answered with a non-2xx status.
  * - `invalid_response`: the server answered 2xx with a body that is not a
  *   valid calculate response.
@@ -55,8 +56,7 @@ export async function calculate(
   const body = await readJson(response)
 
   if (!response.ok) {
-    const message = isApiErrorResponse(body) ? body.error : `Request failed with status ${response.status}`
-    throw new CalculatorApiError('http', message, response.status)
+    throw new CalculatorApiError('http', httpErrorMessage(response.status, body), response.status)
   }
   if (!isCalculateResponse(body)) {
     throw new CalculatorApiError(
@@ -66,6 +66,18 @@ export async function calculate(
     )
   }
   return { result: body.result }
+}
+
+const UNAVAILABLE_MESSAGE = 'The calculator service is unavailable'
+
+/** Statuses a proxy or gateway returns when it cannot get an answer from the backend. */
+const GATEWAY_STATUSES = new Set([502, 503, 504])
+
+/** Picks the message for a non-2xx response: the API's own, if it sent one. */
+function httpErrorMessage(status: number, body: unknown): string {
+  if (isApiErrorResponse(body)) return body.error
+  if (GATEWAY_STATUSES.has(status)) return UNAVAILABLE_MESSAGE
+  return `Request failed with status ${status}`
 }
 
 /**

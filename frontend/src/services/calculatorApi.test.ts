@@ -144,13 +144,29 @@ describe('non-2xx response', () => {
     ['an empty error field', '{"error":""}'],
     ['a success body', '{"result":15}'],
   ])('falls back to a generic message for %s', async (_name, body) => {
-    fetchMock.mockResolvedValue(new Response(body, { status: 502 }))
+    fetchMock.mockResolvedValue(new Response(body, { status: 404 }))
 
     const error = await calculateError()
 
     expect(error.kind).toBe('http')
-    expect(error.status).toBe(502)
-    expect(error.message).toBe('Request failed with status 502')
+    expect(error.status).toBe(404)
+    expect(error.message).toBe('Request failed with status 404')
+  })
+
+  it.each([502, 503, 504])('reports a %i without an API error as the service being unavailable', async (status) => {
+    fetchMock.mockResolvedValue(new Response('', { status }))
+
+    const error = await calculateError()
+
+    expect(error.kind).toBe('http')
+    expect(error.status).toBe(status)
+    expect(error.message).toBe('The calculator service is unavailable')
+  })
+
+  it('prefers the API error message over the gateway fallback', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(503, { error: 'service is restarting' }))
+
+    expect((await calculateError()).message).toBe('service is restarting')
   })
 })
 
@@ -165,6 +181,17 @@ describe('transport failure', () => {
     expect(error.status).toBeNull()
     expect(error.message).toBe('Could not reach the calculator service')
     expect(error.cause).toBe(cause)
+  })
+
+  it('reports a timeout as a network error', async () => {
+    const timeout = new DOMException('The operation timed out.', 'TimeoutError')
+    fetchMock.mockRejectedValue(timeout)
+
+    const error = await calculateError()
+
+    expect(error.kind).toBe('network')
+    expect(error.message).toBe('Could not reach the calculator service')
+    expect(error.cause).toBe(timeout)
   })
 
   it('rethrows an abort instead of wrapping it', async () => {
