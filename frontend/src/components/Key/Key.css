@@ -34,12 +34,12 @@
 
 /* Hover only where a pointer can hover, so it never sticks after a tap. */
 @media (hover: hover) {
-  .key:hover:not(:disabled) {
+  .key:hover:not([aria-disabled='true']) {
     background: var(--key-bg-hover);
   }
 }
 
-.key:active:not(:disabled) {
+.key:active:not([aria-disabled='true']) {
   background: var(--key-bg-active);
   box-shadow: none;
   transform: scale(0.96);
@@ -50,7 +50,7 @@
   outline-offset: 2px;
 }
 
-.key:disabled {
+.key[aria-disabled='true'] {
   box-shadow: none;
   opacity: 0.45;
   cursor: not-allowed;
@@ -108,7 +108,7 @@
     transition: none;
   }
 
-  .key:active:not(:disabled) {
+  .key:active:not([aria-disabled='true']) {
     transform: none;
   }
 }

@@ -1,0 +1,75 @@
+{
+  "description": "The agreement between the backend and the frontend about API errors. The backend tests check that each request body produces this status and code. The frontend tests check that each status and code produces this message for the user. A change on either side that breaks the agreement fails that side's tests.",
+  "cases": [
+    {
+      "name": "division by zero",
+      "body": "{\"operation\":\"divide\",\"a\":1,\"b\":0}",
+      "status": 422,
+      "code": "division_by_zero",
+      "message": "Cannot divide by zero."
+    },
+    {
+      "name": "zero raised to a negative power",
+      "body": "{\"operation\":\"power\",\"a\":0,\"b\":-1}",
+      "status": 422,
+      "code": "division_by_zero",
+      "message": "Cannot divide by zero."
+    },
+    {
+      "name": "negative base raised to a fractional power",
+      "body": "{\"operation\":\"power\",\"a\":-4,\"b\":0.5}",
+      "status": 422,
+      "code": "not_a_real_number",
+      "message": "That calculation has no real-number result."
+    },
+    {
+      "name": "square root of a negative number",
+      "body": "{\"operation\":\"sqrt\",\"a\":-9}",
+      "status": 422,
+      "code": "negative_square_root",
+      "message": "Cannot take the square root of a negative number."
+    },
+    {
+      "name": "result too large",
+      "body": "{\"operation\":\"multiply\",\"a\":1e308,\"b\":10}",
+      "status": 422,
+      "code": "result_out_of_range",
+      "message": "The result is too large to calculate."
+    },
+    {
+      "name": "operand too large",
+      "body": "{\"operation\":\"add\",\"a\":1e400,\"b\":2}",
+      "status": 400,
+      "code": "field_out_of_range",
+      "message": "That number is too large."
+    },
+    {
+      "name": "unsupported operation",
+      "body": "{\"operation\":\"modulo\",\"a\":10,\"b\":3}",
+      "status": 400,
+      "code": "unsupported_operation",
+      "message": "That operation is not supported."
+    },
+    {
+      "name": "missing operand",
+      "body": "{\"operation\":\"add\",\"a\":10}",
+      "status": 400,
+      "code": "missing_field",
+      "message": "The calculation could not be processed. Check your input and try again."
+    },
+    {
+      "name": "second operand sent to a one-operand operation",
+      "body": "{\"operation\":\"sqrt\",\"a\":9,\"b\":2}",
+      "status": 400,
+      "code": "field_not_allowed",
+      "message": "The calculation could not be processed. Check your input and try again."
+    },
+    {
+      "name": "malformed JSON",
+      "body": "{\"operation\":\"add\",",
+      "status": 400,
+      "code": "invalid_json",
+      "message": "The calculation could not be processed. Check your input and try again."
+    }
+  ]
+}

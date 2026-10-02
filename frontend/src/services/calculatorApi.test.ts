@@ -153,6 +153,34 @@ describe('non-2xx response', () => {
     expect(error.message).toBe(apiMessage)
   })
 
+  it('exposes the API error code', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(422, { error: 'division by zero', code: 'division_by_zero' }))
+
+    const error = await calculateError()
+
+    expect(error.code).toBe('division_by_zero')
+    expect(error.apiMessage).toBe('division by zero')
+  })
+
+  it('has no code when the API error body does not include one', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(422, { error: 'division by zero' }))
+
+    const error = await calculateError()
+
+    expect(error.code).toBeNull()
+    expect(error.apiMessage).toBe('division by zero')
+  })
+
+  it('ignores an error body whose code is not a string', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(422, { error: 'division by zero', code: 42 }))
+
+    const error = await calculateError()
+
+    expect(error.code).toBeNull()
+    expect(error.apiMessage).toBeNull()
+    expect(error.message).toBe('Request failed with status 422')
+  })
+
   it.each([
     ['an HTML body', '<html><body>Bad Gateway</body></html>'],
     ['a plain-text body', 'Method Not Allowed'],
@@ -184,6 +212,7 @@ describe('transport failure', () => {
     expect(error.kind).toBe('network')
     expect(error.status).toBeNull()
     expect(error.apiMessage).toBeNull()
+    expect(error.code).toBeNull()
     expect(error.cause).toBe(cause)
   })
 

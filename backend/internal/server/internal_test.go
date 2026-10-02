@@ -47,7 +47,7 @@ func TestCalculateHidesUnexpectedErrors(t *testing.T) {
 	if got := rec.Header().Get("Content-Type"); got != "application/json" {
 		t.Errorf("Content-Type = %q, want %q", got, "application/json")
 	}
-	if got, want := rec.Body.String(), "{\"error\":\"internal server error\"}\n"; got != want {
+	if got, want := rec.Body.String(), "{\"error\":\"internal server error\",\"code\":\"internal_error\"}\n"; got != want {
 		t.Errorf("body = %q, want %q", got, want)
 	}
 	if strings.Contains(rec.Body.String(), "password") {

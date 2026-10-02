@@ -48,7 +48,11 @@ describe('apiCalculationService', () => {
   it.each([
     [
       'division by zero from the backend',
-      new CalculatorApiError('http', 'division by zero', { status: 422, apiMessage: 'division by zero' }),
+      new CalculatorApiError('http', 'division by zero', {
+        status: 422,
+        apiMessage: 'division by zero',
+        code: 'division_by_zero',
+      }),
       'Cannot divide by zero.',
     ],
     [
@@ -56,6 +60,7 @@ describe('apiCalculationService', () => {
       new CalculatorApiError('http', 'square root of a negative number', {
         status: 422,
         apiMessage: 'square root of a negative number',
+        code: 'negative_square_root',
       }),
       'Cannot take the square root of a negative number.',
     ],
@@ -64,6 +69,7 @@ describe('apiCalculationService', () => {
       new CalculatorApiError('http', 'unsupported operation "pow"', {
         status: 400,
         apiMessage: 'unsupported operation "pow": must be one of add, subtract, multiply, divide, power, sqrt, percent',
+        code: 'unsupported_operation',
       }),
       'That operation is not supported.',
     ],

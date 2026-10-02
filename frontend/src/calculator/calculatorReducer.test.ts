@@ -276,16 +276,6 @@ describe('validating the submission', () => {
 
     expect(validationMessage(state)).toBe(VALIDATION_MESSAGES.invalidNumber)
   })
-
-  it('rejects an operand made invalid by editing a very large result', () => {
-    // 1e21 is displayed as "1e+21"; negating it and typing more digits
-    // produces "-1e+21999", which overflows to -Infinity.
-    const result = resolve(submit(run(digit('1'), op('multiply'), digit('1'))), 1e21)
-    const edited = apply(result, sign, digit('9'), digit('9'), digit('9'), op('add'), digit('1'))
-
-    expect(edited.firstOperand).toBe('-1e+21999')
-    expect(validationMessage(edited)).toBe(VALIDATION_MESSAGES.invalidNumber)
-  })
 })
 
 describe('reporting invalid input', () => {
@@ -653,6 +643,120 @@ describe('percent', () => {
     const once = resolve(percent(run(...type('50'))), 0.5)
 
     expect(validateUnarySubmission(once, 'percent')).toEqual({ ok: true, request: { operation: 'percent', a: 0.5 } })
+  })
+})
+
+describe('precision of a result', () => {
+  /** The state after a calculation whose only purpose is to produce the given result. */
+  function resultOf(value: number): CalculatorState {
+    return resolve(submit(run(digit('1'), op('add'), digit('1'))), value)
+  }
+
+  it('shows a long result rounded to 15 significant digits', () => {
+    expect(selectDisplayValue(resultOf(1 / 3))).toBe('0.333333333333333')
+    expect(selectDisplayValue(resultOf(0.1 + 0.2))).toBe('0.3')
+  })
+
+  it.each([
+    ['a repeating decimal', 10 / 3],
+    ['a value with floating-point noise', 0.1 + 0.2],
+    ['an irrational result', Math.SQRT2],
+    ['a very large result', 1e21],
+    ['a very small result', 1e-7],
+    ['a negative result', -1 / 3],
+  ])('sends %s on unrounded as the first operand of the next calculation', (_name, value) => {
+    const state = apply(resultOf(value), op('multiply'), digit('3'))
+
+    expect(requestOf(state)).toEqual({ operation: 'multiply', a: value, b: 3 })
+  })
+
+  it('shows the first operand rounded in the expression while keeping it exact', () => {
+    const state = apply(resultOf(10 / 3), op('multiply'))
+
+    expect(selectExpression(state)).toBe('3.33333333333333 ×')
+    expect(selectDisplayValue(state)).toBe('3.33333333333333')
+    expect(Number(state.firstOperand)).toBe(10 / 3)
+  })
+
+  it('applies a single-operand operation to the unrounded result', () => {
+    expect(validateUnarySubmission(resultOf(10 / 3), 'sqrt')).toEqual({
+      ok: true,
+      request: { operation: 'sqrt', a: 10 / 3 },
+    })
+  })
+
+  it('applies a single-operand operation to an unrounded first operand', () => {
+    const state = apply(resultOf(10 / 3), op('multiply'))
+
+    expect(validateUnarySubmission(state, 'sqrt')).toEqual({ ok: true, request: { operation: 'sqrt', a: 10 / 3 } })
+  })
+
+  it('keeps a single-operand result exact inside a two-operand calculation', () => {
+    const inProgress = run(digit('9'), op('add'), digit('2'))
+    const validation = validateUnarySubmission(inProgress, 'sqrt')
+    if (!validation.ok) throw new Error(validation.message)
+    const pending = calculatorReducer(inProgress, { type: 'submit', requestId: 1, request: validation.request })
+    const done = resolve(pending, Math.SQRT2)
+
+    expect(selectDisplayValue(done)).toBe('1.4142135623731')
+    expect(requestOf(done)).toEqual({ operation: 'add', a: 9, b: Math.SQRT2 })
+  })
+
+  it('shows typed operands exactly as typed', () => {
+    const state = run(...type('0.50'), op('add'), ...type('12.'))
+
+    expect(selectExpression(state)).toBe('0.50 +')
+    expect(selectDisplayValue(state)).toBe('12.')
+  })
+})
+
+describe('editing a result', () => {
+  const done = resolve(submit(run(...type('12'), op('add'), digit('3'))), 15)
+
+  it('starts a new number when a digit follows the sign key', () => {
+    const state = apply(done, sign, digit('7'))
+
+    expect(selectDisplayValue(state)).toBe('7')
+  })
+
+  it('starts at "0." when the decimal point follows the sign key', () => {
+    expect(selectDisplayValue(apply(done, sign, decimal))).toBe('0.')
+  })
+
+  it('restores the result when the sign is toggled twice', () => {
+    expect(selectDisplayValue(apply(done, sign, sign))).toBe('15')
+  })
+
+  it('uses the negated result as the first operand of the next calculation', () => {
+    const state = apply(done, sign, op('multiply'), digit('2'))
+
+    expect(selectExpression(state)).toBe('-15 ×')
+    expect(requestOf(state)).toEqual({ operation: 'multiply', a: -15, b: 2 })
+  })
+
+  it.each([
+    ['a very large result', 1e21, '1e+21', '-1e+21'],
+    ['a very small result', 1e-7, '1e-7', '-1e-7'],
+  ])('never appends digits to %s shown in exponent notation', (_name, value, shown, negated) => {
+    const result = resolve(submit(run(digit('1'), op('add'), digit('1'))), value)
+    expect(selectDisplayValue(result)).toBe(shown)
+
+    const negatedResult = apply(result, sign)
+    expect(selectDisplayValue(negatedResult)).toBe(negated)
+
+    // Before this was fixed, the digit was appended to the exponent ("-1e+215").
+    expect(selectDisplayValue(apply(negatedResult, digit('5')))).toBe('5')
+    expect(requestOf(apply(negatedResult, op('add'), digit('1')))).toEqual({ operation: 'add', a: -value, b: 1 })
+  })
+
+  it('negates the result of a single-operand operation inside a calculation', () => {
+    const inProgress = run(digit('9'), op('add'), ...type('16'))
+    const validation = validateUnarySubmission(inProgress, 'sqrt')
+    if (!validation.ok) throw new Error(validation.message)
+    const rooted = resolve(calculatorReducer(inProgress, { type: 'submit', requestId: 1, request: validation.request }), 4)
+
+    expect(requestOf(apply(rooted, sign))).toEqual({ operation: 'add', a: 9, b: -4 })
+    expect(requestOf(apply(rooted, sign, digit('5')))).toEqual({ operation: 'add', a: 9, b: 5 })
   })
 })
 

@@ -15,5 +15,8 @@ export interface CalculateResponse {
 
 /** Response body the API returns for every error. */
 export interface ApiErrorResponse {
+  /** A description of the problem, written for developers. */
   error: string
+  /** A stable identifier for the problem, e.g. "division_by_zero". */
+  code?: string
 }

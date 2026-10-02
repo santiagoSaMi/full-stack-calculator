@@ -146,7 +146,7 @@ func TestCalculateMultiplication(t *testing.T) {
 		{
 			name:       "overflow",
 			body:       `{"operation":"multiply","a":1e308,"b":10}`,
-			wantStatus: 422, wantBody: `{"error":"result is out of range"}`,
+			wantStatus: 422, wantBody: `{"error":"result is out of range","code":"result_out_of_range"}`,
 		},
 	})
 }
@@ -163,9 +163,9 @@ func TestCalculateDivision(t *testing.T) {
 
 func TestCalculatePower(t *testing.T) {
 	const (
-		divisionByZero = `{"error":"division by zero"}`
-		notReal        = `{"error":"result is not a real number"}`
-		outOfRange     = `{"error":"result is out of range"}`
+		divisionByZero = `{"error":"division by zero","code":"division_by_zero"}`
+		notReal        = `{"error":"result is not a real number","code":"not_a_real_number"}`
+		outOfRange     = `{"error":"result is out of range","code":"result_out_of_range"}`
 	)
 	runAPICases(t, []apiCase{
 		{name: "positive", body: `{"operation":"power","a":2,"b":10}`, wantStatus: 200, wantBody: `{"result":1024}`},
@@ -184,24 +184,24 @@ func TestCalculatePower(t *testing.T) {
 		{name: "underflow to zero", body: `{"operation":"power","a":10,"b":-400}`, wantStatus: 200, wantBody: `{"result":0}`},
 		{
 			name: "missing exponent", body: `{"operation":"power","a":2}`,
-			wantStatus: 400, wantBody: `{"error":"field \"b\" is required"}`,
+			wantStatus: 400, wantBody: `{"error":"field \"b\" is required","code":"missing_field"}`,
 		},
 		{
 			name: "wrong case", body: `{"operation":"Power","a":2,"b":3}`,
 			wantStatus: 400,
-			wantBody:   `{"error":"unsupported operation \"Power\": must be one of add, subtract, multiply, divide, power, sqrt, percent"}`,
+			wantBody:   `{"error":"unsupported operation \"Power\": must be one of add, subtract, multiply, divide, power, sqrt, percent","code":"unsupported_operation"}`,
 		},
 	})
 }
 
 func TestCalculateSquareRoot(t *testing.T) {
 	const (
-		negative     = `{"error":"square root of a negative number"}`
-		bNotAllowed  = `{"error":"field \"b\" is not allowed for operation \"sqrt\""}`
-		aRequired    = `{"error":"field \"a\" is required"}`
-		aNotANumber  = `{"error":"field \"a\" must be a number"}`
-		aOutOfRange  = `{"error":"field \"a\" is out of range"}`
-		unknownField = `{"error":"request body contains unknown field \"x\""}`
+		negative     = `{"error":"square root of a negative number","code":"negative_square_root"}`
+		bNotAllowed  = `{"error":"field \"b\" is not allowed for operation \"sqrt\"","code":"field_not_allowed"}`
+		aRequired    = `{"error":"field \"a\" is required","code":"missing_field"}`
+		aNotANumber  = `{"error":"field \"a\" must be a number","code":"invalid_field_type"}`
+		aOutOfRange  = `{"error":"field \"a\" is out of range","code":"field_out_of_range"}`
+		unknownField = `{"error":"request body contains unknown field \"x\"","code":"unknown_field"}`
 	)
 	runAPICases(t, []apiCase{
 		// Valid requests take a single operand.
@@ -240,20 +240,20 @@ func TestCalculateSquareRoot(t *testing.T) {
 		{
 			name: "wrong case", body: `{"operation":"SQRT","a":9}`,
 			wantStatus: 400,
-			wantBody:   `{"error":"unsupported operation \"SQRT\": must be one of add, subtract, multiply, divide, power, sqrt, percent"}`,
+			wantBody:   `{"error":"unsupported operation \"SQRT\": must be one of add, subtract, multiply, divide, power, sqrt, percent","code":"unsupported_operation"}`,
 		},
 	})
 }
 
 func TestCalculatePercent(t *testing.T) {
 	const (
-		bNotAllowed = `{"error":"field \"b\" is not allowed for operation \"percent\""}`
-		aRequired   = `{"error":"field \"a\" is required"}`
-		aNotANumber = `{"error":"field \"a\" must be a number"}`
-		aOutOfRange = `{"error":"field \"a\" is out of range"}`
+		bNotAllowed = `{"error":"field \"b\" is not allowed for operation \"percent\"","code":"field_not_allowed"}`
+		aRequired   = `{"error":"field \"a\" is required","code":"missing_field"}`
+		aNotANumber = `{"error":"field \"a\" must be a number","code":"invalid_field_type"}`
+		aOutOfRange = `{"error":"field \"a\" is out of range","code":"field_out_of_range"}`
 	)
 	unsupported := func(op string) string {
-		return `{"error":"unsupported operation \"` + op + `\": must be one of add, subtract, multiply, divide, power, sqrt, percent"}`
+		return `{"error":"unsupported operation \"` + op + `\": must be one of add, subtract, multiply, divide, power, sqrt, percent","code":"unsupported_operation"}`
 	}
 	runAPICases(t, []apiCase{
 		// Valid requests take a single operand and return it divided by 100.
@@ -307,7 +307,7 @@ func TestCalculatePercentOfAValue(t *testing.T) {
 // TestCalculateBinaryOperationsStillRequireB guards the contract of the
 // two-operand operations after single-operand requests were introduced.
 func TestCalculateBinaryOperationsStillRequireB(t *testing.T) {
-	const bRequired = `{"error":"field \"b\" is required"}`
+	const bRequired = `{"error":"field \"b\" is required","code":"missing_field"}`
 	ts := newTestServer(t)
 	for _, operation := range []string{"add", "subtract", "multiply", "divide", "power"} {
 		t.Run(operation, func(t *testing.T) {
@@ -326,7 +326,7 @@ func TestCalculateBinaryOperationsStillRequireB(t *testing.T) {
 }
 
 func TestCalculateDivisionByZero(t *testing.T) {
-	const want = `{"error":"division by zero"}`
+	const want = `{"error":"division by zero","code":"division_by_zero"}`
 	runAPICases(t, []apiCase{
 		{name: "positive dividend", body: `{"operation":"divide","a":10,"b":0}`, wantStatus: 422, wantBody: want},
 		{name: "negative dividend", body: `{"operation":"divide","a":-10,"b":0}`, wantStatus: 422, wantBody: want},
@@ -338,7 +338,7 @@ func TestCalculateDivisionByZero(t *testing.T) {
 
 func TestCalculateUnsupportedOperation(t *testing.T) {
 	unsupported := func(op string) string {
-		return `{"error":"unsupported operation \"` + op + `\": must be one of add, subtract, multiply, divide, power, sqrt, percent"}`
+		return `{"error":"unsupported operation \"` + op + `\": must be one of add, subtract, multiply, divide, power, sqrt, percent","code":"unsupported_operation"}`
 	}
 	runAPICases(t, []apiCase{
 		{name: "unknown name", body: `{"operation":"modulo","a":10,"b":5}`, wantStatus: 400, wantBody: unsupported("modulo")},
@@ -354,7 +354,7 @@ func TestCalculateUnsupportedOperation(t *testing.T) {
 }
 
 func TestCalculateMalformedJSON(t *testing.T) {
-	const malformed = `{"error":"request body contains malformed JSON"}`
+	const malformed = `{"error":"request body contains malformed JSON","code":"invalid_json"}`
 	runAPICases(t, []apiCase{
 		{name: "truncated", body: `{"operation":"add","a":10`, wantStatus: 400, wantBody: malformed},
 		{name: "truncated after value", body: `{"operation":"add","a":10,"b":5`, wantStatus: 400, wantBody: malformed},
@@ -365,28 +365,28 @@ func TestCalculateMalformedJSON(t *testing.T) {
 		{name: "not JSON", body: `operation=add&a=10&b=5`, wantStatus: 400, wantBody: malformed},
 		{
 			name: "empty body", body: ``,
-			wantStatus: 400, wantBody: `{"error":"request body must not be empty"}`,
+			wantStatus: 400, wantBody: `{"error":"request body must not be empty","code":"invalid_json"}`,
 		},
 		{
 			name: "array instead of object", body: `[1,2]`,
-			wantStatus: 400, wantBody: `{"error":"request body must be a valid JSON object"}`,
+			wantStatus: 400, wantBody: `{"error":"request body must be a valid JSON object","code":"invalid_json"}`,
 		},
 		{
 			name: "multiple objects", body: `{"operation":"add","a":1,"b":2}{"operation":"add","a":3,"b":4}`,
-			wantStatus: 400, wantBody: `{"error":"request body must contain a single JSON object"}`,
+			wantStatus: 400, wantBody: `{"error":"request body must contain a single JSON object","code":"invalid_json"}`,
 		},
 		{
 			name: "trailing garbage", body: `{"operation":"add","a":1,"b":2}}`,
-			wantStatus: 400, wantBody: `{"error":"request body must contain a single JSON object"}`,
+			wantStatus: 400, wantBody: `{"error":"request body must contain a single JSON object","code":"invalid_json"}`,
 		},
 	})
 }
 
 func TestCalculateMissingFields(t *testing.T) {
 	const (
-		missingOperation = `{"error":"field \"operation\" is required"}`
-		missingA         = `{"error":"field \"a\" is required"}`
-		missingB         = `{"error":"field \"b\" is required"}`
+		missingOperation = `{"error":"field \"operation\" is required","code":"missing_field"}`
+		missingA         = `{"error":"field \"a\" is required","code":"missing_field"}`
+		missingB         = `{"error":"field \"b\" is required","code":"missing_field"}`
 	)
 	runAPICases(t, []apiCase{
 		{name: "operation", body: `{"a":10,"b":5}`, wantStatus: 400, wantBody: missingOperation},
@@ -405,35 +405,35 @@ func TestCalculateFieldTypes(t *testing.T) {
 	runAPICases(t, []apiCase{
 		{
 			name: "string operand", body: `{"operation":"add","a":"10","b":5}`,
-			wantStatus: 400, wantBody: `{"error":"field \"a\" must be a number"}`,
+			wantStatus: 400, wantBody: `{"error":"field \"a\" must be a number","code":"invalid_field_type"}`,
 		},
 		{
 			name: "boolean operand", body: `{"operation":"add","a":10,"b":true}`,
-			wantStatus: 400, wantBody: `{"error":"field \"b\" must be a number"}`,
+			wantStatus: 400, wantBody: `{"error":"field \"b\" must be a number","code":"invalid_field_type"}`,
 		},
 		{
 			name: "object operand", body: `{"operation":"add","a":{},"b":5}`,
-			wantStatus: 400, wantBody: `{"error":"field \"a\" must be a number"}`,
+			wantStatus: 400, wantBody: `{"error":"field \"a\" must be a number","code":"invalid_field_type"}`,
 		},
 		{
 			name: "array operand", body: `{"operation":"add","a":10,"b":[5]}`,
-			wantStatus: 400, wantBody: `{"error":"field \"b\" must be a number"}`,
+			wantStatus: 400, wantBody: `{"error":"field \"b\" must be a number","code":"invalid_field_type"}`,
 		},
 		{
 			name: "numeric operation", body: `{"operation":1,"a":10,"b":5}`,
-			wantStatus: 400, wantBody: `{"error":"field \"operation\" must be a string"}`,
+			wantStatus: 400, wantBody: `{"error":"field \"operation\" must be a string","code":"invalid_field_type"}`,
 		},
 		{
 			name: "array operation", body: `{"operation":["add"],"a":10,"b":5}`,
-			wantStatus: 400, wantBody: `{"error":"field \"operation\" must be a string"}`,
+			wantStatus: 400, wantBody: `{"error":"field \"operation\" must be a string","code":"invalid_field_type"}`,
 		},
 		{
 			name: "operand above float64 range", body: `{"operation":"add","a":1e400,"b":5}`,
-			wantStatus: 400, wantBody: `{"error":"field \"a\" is out of range"}`,
+			wantStatus: 400, wantBody: `{"error":"field \"a\" is out of range","code":"field_out_of_range"}`,
 		},
 		{
 			name: "operand below float64 range", body: `{"operation":"add","a":1,"b":-1e400}`,
-			wantStatus: 400, wantBody: `{"error":"field \"b\" is out of range"}`,
+			wantStatus: 400, wantBody: `{"error":"field \"b\" is out of range","code":"field_out_of_range"}`,
 		},
 	})
 }
@@ -442,37 +442,37 @@ func TestCalculateUnknownAndDuplicateFields(t *testing.T) {
 	runAPICases(t, []apiCase{
 		{
 			name: "unknown field", body: `{"operation":"add","a":10,"b":5,"c":1}`,
-			wantStatus: 400, wantBody: `{"error":"request body contains unknown field \"c\""}`,
+			wantStatus: 400, wantBody: `{"error":"request body contains unknown field \"c\"","code":"unknown_field"}`,
 		},
 		{
 			name: "first unknown field is reported", body: `{"x":1,"operation":"add","a":10,"b":5,"y":2}`,
-			wantStatus: 400, wantBody: `{"error":"request body contains unknown field \"x\""}`,
+			wantStatus: 400, wantBody: `{"error":"request body contains unknown field \"x\"","code":"unknown_field"}`,
 		},
 		{
 			name: "uppercase field names", body: `{"OPERATION":"add","A":10,"B":5}`,
-			wantStatus: 400, wantBody: `{"error":"request body contains unknown field \"OPERATION\""}`,
+			wantStatus: 400, wantBody: `{"error":"request body contains unknown field \"OPERATION\"","code":"unknown_field"}`,
 		},
 		{
 			name: "mixed-case field name", body: `{"operation":"add","a":10,"B":5}`,
-			wantStatus: 400, wantBody: `{"error":"request body contains unknown field \"B\""}`,
+			wantStatus: 400, wantBody: `{"error":"request body contains unknown field \"B\"","code":"unknown_field"}`,
 		},
 		{
 			name: "duplicate operation", body: `{"operation":"add","operation":"divide","a":1,"b":0}`,
-			wantStatus: 400, wantBody: `{"error":"request body contains duplicate field \"operation\""}`,
+			wantStatus: 400, wantBody: `{"error":"request body contains duplicate field \"operation\"","code":"duplicate_field"}`,
 		},
 		{
 			name: "duplicate operand", body: `{"operation":"add","a":1,"a":2,"b":3}`,
-			wantStatus: 400, wantBody: `{"error":"request body contains duplicate field \"a\""}`,
+			wantStatus: 400, wantBody: `{"error":"request body contains duplicate field \"a\"","code":"duplicate_field"}`,
 		},
 		{
 			name: "duplicate null operand", body: `{"operation":"add","a":null,"a":1,"b":3}`,
-			wantStatus: 400, wantBody: `{"error":"request body contains duplicate field \"a\""}`,
+			wantStatus: 400, wantBody: `{"error":"request body contains duplicate field \"a\"","code":"duplicate_field"}`,
 		},
 	})
 }
 
 func TestCalculateBodyShape(t *testing.T) {
-	const notObject = `{"error":"request body must be a valid JSON object"}`
+	const notObject = `{"error":"request body must be a valid JSON object","code":"invalid_json"}`
 	runAPICases(t, []apiCase{
 		{name: "null", body: `null`, wantStatus: 400, wantBody: notObject},
 		{name: "number", body: `42`, wantStatus: 400, wantBody: notObject},
@@ -481,17 +481,17 @@ func TestCalculateBodyShape(t *testing.T) {
 		{name: "array", body: `[{"operation":"add","a":1,"b":2}]`, wantStatus: 400, wantBody: notObject},
 		{
 			name: "whitespace only", body: "  \n\t ",
-			wantStatus: 400, wantBody: `{"error":"request body must not be empty"}`,
+			wantStatus: 400, wantBody: `{"error":"request body must not be empty","code":"invalid_json"}`,
 		},
 		{
 			name:       "body too large",
 			body:       `{"operation":"add","a":10,"b":5,"pad":"` + strings.Repeat("x", 1024) + `"}`,
-			wantStatus: 413, wantBody: `{"error":"request body must not exceed 1024 bytes"}`,
+			wantStatus: 413, wantBody: `{"error":"request body must not exceed 1024 bytes","code":"body_too_large"}`,
 		},
 		{
 			name:       "trailing data too large",
 			body:       `{"operation":"add","a":10,"b":5}` + strings.Repeat(" ", 1024) + `{}`,
-			wantStatus: 413, wantBody: `{"error":"request body must not exceed 1024 bytes"}`,
+			wantStatus: 413, wantBody: `{"error":"request body must not exceed 1024 bytes","code":"body_too_large"}`,
 		},
 	})
 }
@@ -503,56 +503,56 @@ func TestCalculateValidationOrder(t *testing.T) {
 		{
 			name:        "content type before body",
 			contentType: "text/plain", body: `{bad json`,
-			wantStatus: 415, wantBody: `{"error":"Content-Type must be application/json"}`,
+			wantStatus: 415, wantBody: `{"error":"Content-Type must be application/json","code":"unsupported_media_type"}`,
 		},
 		{
 			name:       "size before unknown field",
 			body:       `{"c":"` + strings.Repeat("x", 1024) + `"}`,
-			wantStatus: 413, wantBody: `{"error":"request body must not exceed 1024 bytes"}`,
+			wantStatus: 413, wantBody: `{"error":"request body must not exceed 1024 bytes","code":"body_too_large"}`,
 		},
 		{
 			name:       "early syntax error in oversized body",
 			body:       `{bad` + strings.Repeat(" ", 2048),
-			wantStatus: 400, wantBody: `{"error":"request body contains malformed JSON"}`,
+			wantStatus: 400, wantBody: `{"error":"request body contains malformed JSON","code":"invalid_json"}`,
 		},
 		{
 			name: "malformed JSON before unknown field", body: `{"c":1,"operation":`,
-			wantStatus: 400, wantBody: `{"error":"request body contains malformed JSON"}`,
+			wantStatus: 400, wantBody: `{"error":"request body contains malformed JSON","code":"invalid_json"}`,
 		},
 		{
 			name: "single object before unknown field", body: `{"c":1}{}`,
-			wantStatus: 400, wantBody: `{"error":"request body must contain a single JSON object"}`,
+			wantStatus: 400, wantBody: `{"error":"request body must contain a single JSON object","code":"invalid_json"}`,
 		},
 		{
 			name: "unknown field before missing fields", body: `{"c":1}`,
-			wantStatus: 400, wantBody: `{"error":"request body contains unknown field \"c\""}`,
+			wantStatus: 400, wantBody: `{"error":"request body contains unknown field \"c\"","code":"unknown_field"}`,
 		},
 		{
 			name: "unknown field before unsupported operation", body: `{"operation":"pow","a":1,"b":2,"c":3}`,
-			wantStatus: 400, wantBody: `{"error":"request body contains unknown field \"c\""}`,
+			wantStatus: 400, wantBody: `{"error":"request body contains unknown field \"c\"","code":"unknown_field"}`,
 		},
 		{
 			name: "unsupported operation before missing operands", body: `{"operation":"pow"}`,
 			wantStatus: 400,
-			wantBody:   `{"error":"unsupported operation \"pow\": must be one of add, subtract, multiply, divide, power, sqrt, percent"}`,
+			wantBody:   `{"error":"unsupported operation \"pow\": must be one of add, subtract, multiply, divide, power, sqrt, percent","code":"unsupported_operation"}`,
 		},
 		{
 			name: "operation type before operand type", body: `{"operation":1,"a":"x","b":2}`,
-			wantStatus: 400, wantBody: `{"error":"field \"operation\" must be a string"}`,
+			wantStatus: 400, wantBody: `{"error":"field \"operation\" must be a string","code":"invalid_field_type"}`,
 		},
 		{
 			name: "a before b", body: `{"operation":"add","a":"x"}`,
-			wantStatus: 400, wantBody: `{"error":"field \"a\" must be a number"}`,
+			wantStatus: 400, wantBody: `{"error":"field \"a\" must be a number","code":"invalid_field_type"}`,
 		},
 		{
 			name: "validation before division by zero", body: `{"operation":"divide","a":"x","b":0}`,
-			wantStatus: 400, wantBody: `{"error":"field \"a\" must be a number"}`,
+			wantStatus: 400, wantBody: `{"error":"field \"a\" must be a number","code":"invalid_field_type"}`,
 		},
 	})
 }
 
 func TestCalculateContentType(t *testing.T) {
-	const unsupported = `{"error":"Content-Type must be application/json"}`
+	const unsupported = `{"error":"Content-Type must be application/json","code":"unsupported_media_type"}`
 	const valid = `{"operation":"add","a":1,"b":2}`
 	runAPICases(t, []apiCase{
 		{name: "with charset", contentType: "application/json; charset=utf-8", body: valid, wantStatus: 200, wantBody: `{"result":3}`},
@@ -564,7 +564,7 @@ func TestCalculateContentType(t *testing.T) {
 }
 
 func TestCalculateIncorrectMethod(t *testing.T) {
-	const want = `{"error":"method not allowed"}`
+	const want = `{"error":"method not allowed","code":"method_not_allowed"}`
 	ts := newTestServer(t)
 	for _, method := range []string{
 		http.MethodGet, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions,
@@ -603,7 +603,7 @@ func TestAPIUnknownPathNotFound(t *testing.T) {
 			if res.status != http.StatusNotFound {
 				t.Errorf("status = %d, want %d", res.status, http.StatusNotFound)
 			}
-			assertJSON(t, res, `{"error":"not found"}`)
+			assertJSON(t, res, `{"error":"not found","code":"not_found"}`)
 		})
 	}
 }

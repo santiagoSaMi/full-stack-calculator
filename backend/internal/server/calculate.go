@@ -71,38 +71,45 @@ func unary(fn func(x float64) (float64, error)) func(a, b float64) (float64, err
 	}
 }
 
-// isCalculationError reports whether err is a calculator error caused by the
-// operands, which clients should be told about.
-func isCalculationError(err error) bool {
-	return errors.Is(err, calculator.ErrDivisionByZero) ||
-		errors.Is(err, calculator.ErrNotRealNumber) ||
-		errors.Is(err, calculator.ErrNegativeSquareRoot)
+// calculationErrorCode returns the API code for a calculator error caused by
+// the operands, which clients should be told about. ok is false for any
+// other error.
+func calculationErrorCode(err error) (code string, ok bool) {
+	switch {
+	case errors.Is(err, calculator.ErrDivisionByZero):
+		return codeDivisionByZero, true
+	case errors.Is(err, calculator.ErrNotRealNumber):
+		return codeNotARealNumber, true
+	case errors.Is(err, calculator.ErrNegativeSquareRoot):
+		return codeNegativeSquareRoot, true
+	}
+	return "", false
 }
 
 func handleCalculate(w http.ResponseWriter, r *http.Request) {
 	if !isJSON(r.Header.Get("Content-Type")) {
-		writeError(w, http.StatusUnsupportedMediaType, "Content-Type must be application/json")
+		writeError(w, http.StatusUnsupportedMediaType, codeUnsupportedMediaType, "Content-Type must be application/json")
 		return
 	}
 
 	req, apiErr := decodeCalculateRequest(http.MaxBytesReader(w, r.Body, maxRequestBytes))
 	if apiErr != nil {
-		writeError(w, apiErr.status, apiErr.message)
+		writeError(w, apiErr.status, apiErr.code, apiErr.message)
 		return
 	}
 
 	result, err := operations[req.Operation].apply(req.A, req.B)
-	if isCalculationError(err) {
-		writeError(w, http.StatusUnprocessableEntity, err.Error())
+	if code, ok := calculationErrorCode(err); ok {
+		writeError(w, http.StatusUnprocessableEntity, code, err.Error())
 		return
 	}
 	if err != nil {
 		log.Printf("calculate %s: %v", req.Operation, err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		writeError(w, http.StatusInternalServerError, codeInternalError, "internal server error")
 		return
 	}
 	if math.IsInf(result, 0) || math.IsNaN(result) {
-		writeError(w, http.StatusUnprocessableEntity, "result is out of range")
+		writeError(w, http.StatusUnprocessableEntity, codeResultOutOfRange, "result is out of range")
 		return
 	}
 
@@ -112,11 +119,12 @@ func handleCalculate(w http.ResponseWriter, r *http.Request) {
 // apiError is a client-facing error with the HTTP status to respond with.
 type apiError struct {
 	status  int
+	code    string
 	message string
 }
 
-func badRequest(format string, args ...any) *apiError {
-	return &apiError{status: http.StatusBadRequest, message: fmt.Sprintf(format, args...)}
+func badRequest(code, format string, args ...any) *apiError {
+	return &apiError{status: http.StatusBadRequest, code: code, message: fmt.Sprintf(format, args...)}
 }
 
 // allowedFields is the exact, case-sensitive set of accepted request fields.
@@ -150,7 +158,7 @@ func decodeCalculateRequest(body io.Reader) (calculateRequest, *apiError) {
 		// Rejected rather than ignored, so a client that sends a second
 		// operand by mistake finds out.
 		if !isNull(fields["b"]) {
-			return calculateRequest{}, badRequest(`field "b" is not allowed for operation %q`, op)
+			return calculateRequest{}, badRequest(codeFieldNotAllowed, `field "b" is not allowed for operation %q`, op)
 		}
 		return calculateRequest{Operation: op, A: a}, nil
 	}
@@ -173,12 +181,12 @@ func readObject(body io.Reader) (map[string]json.RawMessage, *apiError) {
 	tok, err := dec.Token()
 	if err != nil {
 		if errors.Is(err, io.EOF) {
-			return nil, badRequest("request body must not be empty")
+			return nil, badRequest(codeInvalidJSON, "request body must not be empty")
 		}
 		return nil, syntaxError(err)
 	}
 	if tok != json.Delim('{') {
-		return nil, badRequest("request body must be a valid JSON object")
+		return nil, badRequest(codeInvalidJSON, "request body must be a valid JSON object")
 	}
 
 	fields := make(map[string]json.RawMessage)
@@ -196,9 +204,9 @@ func readObject(body io.Reader) (map[string]json.RawMessage, *apiError) {
 
 		// Keep only the first field problem, in document order.
 		if _, seen := fields[key]; fieldErr == nil && !allowedFields[key] {
-			fieldErr = badRequest("request body contains unknown field %q", key)
+			fieldErr = badRequest(codeUnknownField, "request body contains unknown field %q", key)
 		} else if fieldErr == nil && seen {
-			fieldErr = badRequest("request body contains duplicate field %q", key)
+			fieldErr = badRequest(codeDuplicateField, "request body contains duplicate field %q", key)
 		}
 		fields[key] = value
 	}
@@ -210,7 +218,7 @@ func readObject(body io.Reader) (map[string]json.RawMessage, *apiError) {
 		if errors.As(err, &maxBytesErr) {
 			return nil, syntaxError(err)
 		}
-		return nil, badRequest("request body must contain a single JSON object")
+		return nil, badRequest(codeInvalidJSON, "request body must contain a single JSON object")
 	}
 	if fieldErr != nil {
 		return nil, fieldErr
@@ -224,10 +232,11 @@ func syntaxError(err error) *apiError {
 	if errors.As(err, &maxBytesErr) {
 		return &apiError{
 			status:  http.StatusRequestEntityTooLarge,
+			code:    codeBodyTooLarge,
 			message: fmt.Sprintf("request body must not exceed %d bytes", maxRequestBytes),
 		}
 	}
-	return badRequest("request body contains malformed JSON")
+	return badRequest(codeInvalidJSON, "request body contains malformed JSON")
 }
 
 // isNull reports whether a field is absent or explicitly null.
@@ -238,17 +247,17 @@ func isNull(raw json.RawMessage) bool {
 func operationField(fields map[string]json.RawMessage) (string, *apiError) {
 	raw := fields["operation"]
 	if isNull(raw) {
-		return "", badRequest(`field "operation" is required`)
+		return "", badRequest(codeMissingField, `field "operation" is required`)
 	}
 	var op string
 	if err := json.Unmarshal(raw, &op); err != nil {
-		return "", badRequest(`field "operation" must be a string`)
+		return "", badRequest(codeInvalidFieldType, `field "operation" must be a string`)
 	}
 	if op == "" {
-		return "", badRequest(`field "operation" is required`)
+		return "", badRequest(codeMissingField, `field "operation" is required`)
 	}
 	if _, ok := operations[op]; !ok {
-		return "", badRequest("unsupported operation %q: must be one of %s", op, supportedOperations)
+		return "", badRequest(codeUnsupportedOperation, "unsupported operation %q: must be one of %s", op, supportedOperations)
 	}
 	return op, nil
 }
@@ -256,16 +265,16 @@ func operationField(fields map[string]json.RawMessage) (string, *apiError) {
 func numberField(fields map[string]json.RawMessage, name string) (float64, *apiError) {
 	raw := fields[name]
 	if isNull(raw) {
-		return 0, badRequest("field %q is required", name)
+		return 0, badRequest(codeMissingField, "field %q is required", name)
 	}
 	var n float64
 	if err := json.Unmarshal(raw, &n); err != nil {
 		// A JSON number starts with '-' or a digit; if it still failed to
 		// decode, it does not fit in a float64.
 		if c := raw[0]; c == '-' || (c >= '0' && c <= '9') {
-			return 0, badRequest("field %q is out of range", name)
+			return 0, badRequest(codeFieldOutOfRange, "field %q is out of range", name)
 		}
-		return 0, badRequest("field %q must be a number", name)
+		return 0, badRequest(codeInvalidFieldType, "field %q must be a number", name)
 	}
 	return n, nil
 }

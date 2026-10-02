@@ -2,7 +2,7 @@
 import { cleanup, render } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { BinaryOperation } from '../../calculator/types.ts'
-import { isSelected, key, KEY_NAMES, press } from '../../test/calculatorPage.ts'
+import { isDisabled, isSelected, key, KEY_NAMES, press } from '../../test/calculatorPage.ts'
 import type { KeyName } from '../../test/calculatorPage.ts'
 import { Keypad } from './Keypad.tsx'
 import type { KeypadProps } from './Keypad.tsx'
@@ -109,11 +109,25 @@ describe('Keypad', () => {
     }
   })
 
+  it('keeps unavailable keys focusable, so keyboard focus is not lost', () => {
+    renderKeypad({ disabled: true })
+
+    for (const name of KEY_NAMES) {
+      // The disabled attribute would remove the key from the tab order and
+      // drop focus if it was focused; aria-disabled does neither.
+      expect(key(name).disabled).toBe(false)
+    }
+
+    key('Equals').focus()
+
+    expect(document.activeElement).toBe(key('Equals'))
+  })
+
   it('disables every key except Clear when disabled', () => {
     const handlers = renderKeypad({ disabled: true })
 
     for (const name of KEY_NAMES) {
-      expect(key(name)).toHaveProperty('disabled', name !== 'Clear')
+      expect(isDisabled(name)).toBe(name !== 'Clear')
     }
 
     press(...KEY_NAMES)

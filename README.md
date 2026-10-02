@@ -37,12 +37,12 @@ The two communicate over one endpoint, `POST /api/v1/calculate`.
 
 - Addition, subtraction, multiplication, division, exponentiation, square root and percentage.
 - Decimal and negative numbers, up to 15 digits per number.
-- A result can start the next calculation (`12 + 3 =` then `× 2 =`).
+- A result can start the next calculation (`12 + 3 =` then `× 2 =`). It is carried over at full precision, so `10 ÷ 3 =` then `× 3 =` gives `10`.
 - Square root and percentage act on the number shown and can be used inside a calculation (`9 + 16 √ =` gives `13`).
-- A loading state while waiting for the API; keys are disabled, except Clear.
+- A loading state while waiting for the API; keys are unavailable, except Clear.
 - Clear messages for incomplete input, calculation errors, network failures and an unavailable backend, with the entered numbers kept so the calculation can be corrected and retried.
 - Responsive layout from 320 px wide, with light and dark colour schemes that follow the system setting.
-- Accessible controls: every key is a labelled button that can be reached and pressed with the keyboard, the result is announced as it changes, and errors are announced as alerts.
+- Accessible controls: every key is a labelled button that can be reached and pressed with the keyboard, keyboard focus stays on the key that was pressed while a calculation loads, the result is announced as it changes, and errors are announced as alerts.
 
 **API**
 
@@ -89,6 +89,7 @@ The reasoning behind this structure is in [Design rationale](#design-rationale).
 .
 ├── README.md
 ├── compose.yaml                  builds and runs both containers
+├── contract/                     error cases both test suites check (see Error handling)
 ├── backend/
 │   ├── Dockerfile                multi-stage build: static binary on a minimal base
 │   ├── Makefile                  test, coverage and run targets
@@ -309,11 +310,11 @@ curl -X POST http://localhost:8080/api/v1/calculate \
 | `{"operation":"power","a":2,"b":10}` | `200` | `{"result":1024}` |
 | `{"operation":"sqrt","a":9}` | `200` | `{"result":3}` |
 | `{"operation":"percent","a":50}` | `200` | `{"result":0.5}` |
-| `{"operation":"divide","a":10,"b":0}` | `422` | `{"error":"division by zero"}` |
-| `{"operation":"sqrt","a":-9}` | `422` | `{"error":"square root of a negative number"}` |
-| `{"operation":"add","a":10}` | `400` | `{"error":"field \"b\" is required"}` |
-| `{"operation":"sqrt","a":9,"b":2}` | `400` | `{"error":"field \"b\" is not allowed for operation \"sqrt\""}` |
-| `{"operation":"modulo","a":10,"b":3}` | `400` | `{"error":"unsupported operation \"modulo\": must be one of add, subtract, multiply, divide, power, sqrt, percent"}` |
+| `{"operation":"divide","a":10,"b":0}` | `422` | `{"error":"division by zero","code":"division_by_zero"}` |
+| `{"operation":"sqrt","a":-9}` | `422` | `{"error":"square root of a negative number","code":"negative_square_root"}` |
+| `{"operation":"add","a":10}` | `400` | `{"error":"field \"b\" is required","code":"missing_field"}` |
+| `{"operation":"sqrt","a":9,"b":2}` | `400` | `{"error":"field \"b\" is not allowed for operation \"sqrt\"","code":"field_not_allowed"}` |
+| `{"operation":"modulo","a":10,"b":3}` | `400` | `{"error":"unsupported operation \"modulo\": must be one of add, subtract, multiply, divide, power, sqrt, percent","code":"unsupported_operation"}` |
 
 ### Percentage
 
@@ -327,36 +328,38 @@ curl -X POST http://localhost:8080/api/v1/calculate \
 
 ### API errors
 
-Every error under `/api/` is JSON with one field:
+Every error under `/api/` is JSON with two fields:
 
 ```json
-{ "error": "division by zero" }
+{ "error": "division by zero", "code": "division_by_zero" }
 ```
 
-`400` means the request itself is invalid. `422` means it is well-formed but cannot be computed. Only the first failing check is reported; the rows from `405` down to the last `422` are listed in the order the checks run.
+- **`code`** identifies the problem for a program. Codes are part of the API contract: clients should branch on the code and the HTTP status. New codes may be added; existing ones are not renamed.
+- **`error`** describes the problem for a developer. Its wording may change.
 
-| Status | When | `error` |
-|--------|------|---------|
-| `405` | Method is not `POST` (the response includes `Allow: POST`) | `method not allowed` |
-| `415` | `Content-Type` is not `application/json` | `Content-Type must be application/json` |
-| `413` | Body is larger than 1024 bytes | `request body must not exceed 1024 bytes` |
-| `400` | Body is empty | `request body must not be empty` |
-| `400` | Body is not valid JSON | `request body contains malformed JSON` |
-| `400` | Body is not a JSON object | `request body must be a valid JSON object` |
-| `400` | Body has content after the object | `request body must contain a single JSON object` |
-| `400` | Unknown or duplicate field | `request body contains unknown field "<name>"` / `request body contains duplicate field "<name>"` |
-| `400` | `operation` is missing, not a string, or not supported | `field "operation" is required` / `field "operation" must be a string` / `unsupported operation "<op>": must be one of …` |
-| `400` | `a` is missing, not a number, or too large for a 64-bit float | `field "a" is required` / `field "a" must be a number` / `field "a" is out of range` |
-| `400` | The same checks for `b`, for two-operand operations | `field "b" is required` / `field "b" must be a number` / `field "b" is out of range` |
-| `400` | `b` is sent with a one-operand operation | `field "b" is not allowed for operation "<op>"` |
-| `422` | Division by zero, or zero raised to a negative power | `division by zero` |
-| `422` | Negative base raised to a fractional power | `result is not a real number` |
-| `422` | Square root of a negative number | `square root of a negative number` |
-| `422` | Result is too large for a 64-bit float | `result is out of range` |
-| `404` | Unknown path under `/api/` | `not found` |
-| `500` | Unexpected server failure (details are logged, not returned) | `internal server error` |
+`400` means the request itself is invalid. `422` means it is well-formed but cannot be computed. Only the first failing check is reported. Checks run in this order: method, content type, body size and JSON syntax, unknown and duplicate fields, then each field in turn, then the calculation itself.
 
-The body size limit and the JSON syntax are checked together as the body is read, so the first of those problems found in the body is the one reported.
+| Status | `code` | When | `error` |
+|--------|--------|------|---------|
+| `405` | `method_not_allowed` | Method is not `POST` (the response includes `Allow: POST`) | `method not allowed` |
+| `415` | `unsupported_media_type` | `Content-Type` is not `application/json` | `Content-Type must be application/json` |
+| `413` | `body_too_large` | Body is larger than 1024 bytes | `request body must not exceed 1024 bytes` |
+| `400` | `invalid_json` | Body is empty, is not valid JSON, is not a JSON object, or has content after the object | `request body must not be empty` / `request body contains malformed JSON` / `request body must be a valid JSON object` / `request body must contain a single JSON object` |
+| `400` | `unknown_field` | A field other than `operation`, `a` and `b` | `request body contains unknown field "<name>"` |
+| `400` | `duplicate_field` | A field that appears twice | `request body contains duplicate field "<name>"` |
+| `400` | `missing_field` | `operation`, `a` or (for two-operand operations) `b` is missing or `null` | `field "<name>" is required` |
+| `400` | `invalid_field_type` | `operation` is not a string, or an operand is not a number | `field "operation" must be a string` / `field "<name>" must be a number` |
+| `400` | `unsupported_operation` | `operation` is not one of the supported names | `unsupported operation "<op>": must be one of …` |
+| `400` | `field_out_of_range` | An operand is too large for a 64-bit float | `field "<name>" is out of range` |
+| `400` | `field_not_allowed` | `b` is sent with a one-operand operation | `field "b" is not allowed for operation "<op>"` |
+| `422` | `division_by_zero` | Division by zero, or zero raised to a negative power | `division by zero` |
+| `422` | `not_a_real_number` | Negative base raised to a fractional power | `result is not a real number` |
+| `422` | `negative_square_root` | Square root of a negative number | `square root of a negative number` |
+| `422` | `result_out_of_range` | Result is too large for a 64-bit float | `result is out of range` |
+| `404` | `not_found` | Unknown path under `/api/` | `not found` |
+| `500` | `internal_error` | Unexpected server failure (details are logged, not returned) | `internal server error` |
+
+Fields are checked one at a time: `operation` first (present, a string, supported), then `a` (present, a number, in range), then `b`. The body size limit and the JSON syntax are checked together as the body is read, so the first of those problems found in the body is the one reported.
 
 ### Errors in the frontend
 
@@ -383,7 +386,9 @@ The frontend never shows the API's `error` text or a raw technical error. Every 
 
 The first three are checked in the frontend before anything is sent. The calculation rules (division by zero, negative square roots and so on) are not checked in the frontend: the request is sent and the backend decides.
 
-A few API error texts are matched to give the specific messages above: `division by zero`, `square root of a negative number`, `result is not a real number`, `result is out of range`, `field "a" is out of range` (and the same for `b`), and any text starting with `unsupported operation`. Changing those texts in the backend requires updating that file. Any other error, and every `5xx`, gets a message chosen by status code alone.
+The specific messages above are chosen from the API's error `code` (`division_by_zero`, `negative_square_root`, `not_a_real_number`, `result_out_of_range`, `field_out_of_range`, `unsupported_operation`), never from its error text. Any other code, and every `5xx`, gets a message chosen by status code alone, so an error the frontend does not know about still gets a sensible message.
+
+`contract/api-errors.json` records this agreement as a list of cases: a request, the status and code the backend must answer with, and the message the frontend must show. Each side's test suite checks its half against the same file, so a change that breaks the agreement fails the tests on the side that made it.
 
 ## Running tests
 
@@ -433,7 +438,7 @@ This prints a coverage table and writes an HTML report to `coverage/index.html`.
 
 | | Statements | Branches | Functions | Lines |
 |---|---|---|---|---|
-| Backend | 92.5% | n/a | n/a | n/a |
+| Backend | 92.6% | n/a | n/a | n/a |
 | Frontend | 100% | 99.4% | 100% | 100% |
 
 Go's coverage tool reports statements only. By package: `internal/calculator` 100%, `internal/server` 100%, `cmd/server` 58.8%.
@@ -471,7 +476,7 @@ Principles followed:
 - No test makes a real network request.
 - Coverage is a by-product, not a target: no test exists only to execute a line.
 
-There is no automated end-to-end test that runs the real frontend against the real backend in a browser.
+There is no automated end-to-end test that runs the real frontend against the real backend in a browser. The error contract (`contract/api-errors.json`) covers the part of that gap where the two sides could silently disagree: both test suites check the same error cases.
 
 ## Design rationale
 
@@ -495,7 +500,7 @@ Each choice below is explained by what it does in this codebase.
 ### REST API
 
 - **Plain JSON over HTTP** is what the browser's `fetch` speaks natively and what `curl` can exercise, so the API is usable and testable without a client library.
-- **Status codes carry meaning.** `400` is an invalid request and `422` is a valid request that cannot be computed. The frontend relies on this: its message for every server error, and its fallback for any error text it does not recognise, are chosen from the status code alone.
+- **Status codes carry meaning.** `400` is an invalid request and `422` is a valid request that cannot be computed. The frontend relies on this: its message for every server error, and its fallback for any error code it does not recognise, are chosen from the status code alone.
 - **One endpoint with an `operation` field**, not one endpoint per operation. A calculation is an action with no stored resource, so it is a `POST`. Power, square root and percentage were each added without a new route.
 - **Stateless.** Every request carries everything needed, which is why `percent` is defined as a function of one number and not of a calculation in progress.
 - **Versioned path.** `/api/v1` leaves room for an incompatible change later.
@@ -530,9 +535,9 @@ Each choice below is explained by what it does in this codebase.
 
 ### Error handling approach
 
-- **One error shape.** Every error under `/api/` is `{"error": "…"}` with a JSON content type, including `404` and `405`, so a client needs one parser.
-- **The API describes; the frontend decides the wording.** API messages are technical. The frontend translates every failure in one function (`calculationErrorMessages.ts`) and never shows API text or a raw exception.
-- **Server errors are judged by status only.** For any `5xx` the response text is ignored, so a failing server can never be shown as a calculation error.
+- **One error shape.** Every error under `/api/` is `{"error": "…", "code": "…"}` with a JSON content type, including `404` and `405`, so a client needs one parser.
+- **The API identifies; the frontend decides the wording.** Each API error has a stable `code` for programs and a technical message for developers. The frontend translates every failure in one function (`calculationErrorMessages.ts`), choosing by code and status, and never shows API text or a raw exception.
+- **Server errors are judged by status only.** For any `5xx` the response body is ignored, so a failing server can never be shown as a calculation error.
 - **Only one error type reaches the screen.** When the service fails, the hook displays its message only if the failure is a `CalculationError`; anything else, such as a bug, gets a generic message.
 - **Errors are recoverable.** The entered numbers are kept after a failure, so the user can correct the input or retry, and each request carries an id so a response that arrives after Clear is ignored.
 
@@ -544,7 +549,7 @@ The frontend never computes a result. It sends the operands and shows what the A
 - **No second implementation to keep in step.** A copy of the arithmetic in TypeScript would have to match the backend in every edge case, and a mismatch would only show up as the UI and the API disagreeing.
 - **The same applies to the rules, not only the sums.** The frontend does not check for division by zero or a negative square root. It sends the request and shows the backend's answer.
 
-Two things do happen locally, and neither is arithmetic on the result. Before sending, the frontend checks that the entry is complete and the operands are finite numbers. After receiving, it formats the number for display to 15 significant digits, so `0.30000000000000004` is shown as `0.3`.
+Two things do happen locally, and neither is arithmetic on the result. Before sending, the frontend checks that the entry is complete and the operands are finite numbers. After receiving, it formats the number for display to 15 significant digits, so `0.30000000000000004` is shown as `0.3`. The rounding is for display only: when a result starts the next calculation, the exact value the API returned is sent, not the rounded text.
 
 The cost is a network round trip per calculation and no offline use. The loading state, the 10-second request timeout and the error messages exist to handle that.
 
@@ -563,5 +568,5 @@ Tests enforce the rule: they make the mocked API answer `2 + 2` with `5` and che
 - **One operation at a time.** Selecting a new operation when both numbers are entered switches the operation; it does not evaluate the pending one first.
 - **The Docker setup is a starting point for deployment, not a complete one.** It has no HTTPS, no container health check for the backend (its image has no shell to run one), and no resource limits or orchestration.
 - **No CORS support.** The backend sends no CORS headers, so the frontend and the API must be served from one origin, as the dev proxy and the nginx container both arrange.
-- **64-bit floating point.** Numbers are IEEE 754 doubles on both sides, so results have about 15 to 17 significant digits.
+- **64-bit floating point.** Numbers are IEEE 754 doubles on both sides, so results have about 15 to 17 significant digits. Results are shown rounded to 15 digits but carried into the next calculation exactly, so floating-point effects the display hides can surface later: `0.1 + 0.2 =` shows `0.3`, and `− 0.3 =` then shows `5.55111512312578e-17`, not `0`.
 - **No authentication or rate limiting.**

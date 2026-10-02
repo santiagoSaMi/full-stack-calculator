@@ -11,6 +11,11 @@ export interface KeyProps {
   label?: string
   /** Marks a toggle key (e.g. the selected operation) as active. */
   pressed?: boolean
+  /**
+   * Makes the key unavailable. It stays focusable (aria-disabled, not the
+   * disabled attribute), so a keyboard user who has just pressed it does not
+   * lose their place while it is unavailable.
+   */
   disabled?: boolean
 }
 
@@ -28,8 +33,8 @@ export function Key({
     <button
       type="button"
       className={className}
-      onClick={onPress}
-      disabled={disabled}
+      onClick={disabled ? undefined : onPress}
+      aria-disabled={disabled || undefined}
       aria-label={label}
       aria-pressed={pressed}
     >

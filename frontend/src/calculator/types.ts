@@ -46,7 +46,7 @@ export interface CalculatorState {
   operation: BinaryOperation | null
   /**
    * Operand currently being typed. Empty right after selecting an operation.
-   * After a successful calculation it holds the result.
+   * After a successful calculation it holds the result at full precision.
    */
   currentInput: string
   /** True while the input holds a result, so typing replaces it instead of editing it. */

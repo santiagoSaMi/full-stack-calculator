@@ -2,7 +2,7 @@
 import { act, cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App.tsx'
-import { alert, expression, isLoading, key, press, value } from './test/calculatorPage.ts'
+import { alert, expression, isDisabled, isLoading, press, value } from './test/calculatorPage.ts'
 
 /*
  * The whole frontend with only the network mocked: the real components, hook,
@@ -137,7 +137,7 @@ describe('App', () => {
 
       expect(sentBody()).toEqual({ operation: 'sqrt', a: -9 })
 
-      await request.respond(422, { error: 'square root of a negative number' })
+      await request.respond(422, { error: 'square root of a negative number', code: 'negative_square_root' })
 
       expect(alert()).toBe('Cannot take the square root of a negative number.')
       expect(value()).toBe('-9')
@@ -237,7 +237,7 @@ describe('App', () => {
 
     expect(isLoading()).toBe(true)
     expect(expression()).toBe('12 + 3 =')
-    expect(key('7')).toHaveProperty('disabled', true)
+    expect(isDisabled('7')).toBe(true)
 
     await request.respond(200, { result: 15 })
 
@@ -245,7 +245,7 @@ describe('App', () => {
     expect(value()).toBe('15')
     expect(expression()).toBe('12 + 3 =')
     expect(alert()).toBeNull()
-    expect(key('7')).toHaveProperty('disabled', false)
+    expect(isDisabled('7')).toBe(false)
   })
 
   it('shows exactly what the API returned rather than computing it', async () => {
@@ -266,6 +266,26 @@ describe('App', () => {
     await request.respond(200, { result: 0.30000000000000004 })
 
     expect(value()).toBe('0.3')
+  })
+
+  it('sends a result on at full precision: 10 ÷ 3 = × 3 = gives 10', async () => {
+    const first = pendingRequest()
+    render(<App />)
+
+    press('1', '0', 'Divide', '3', 'Equals')
+    await first.respond(200, { result: 3.3333333333333335 })
+
+    expect(value()).toBe('3.33333333333333')
+
+    const second = pendingRequest()
+    press('Multiply', '3', 'Equals')
+
+    // The exact value the API returned, not the 15 digits on the display.
+    expect(fetchMock.mock.calls[1]![1]?.body).toBe('{"operation":"multiply","a":3.3333333333333335,"b":3}')
+
+    await second.respond(200, { result: 10 })
+
+    expect(value()).toBe('10')
   })
 
   it('uses a result as the start of the next calculation', async () => {
@@ -318,30 +338,43 @@ describe('App', () => {
 
   describe('API errors', () => {
     it.each([
-      ['division by zero', 422, { error: 'division by zero' }, 'Cannot divide by zero.'],
+      [
+        'division by zero',
+        422,
+        { error: 'division by zero', code: 'division_by_zero' },
+        'Cannot divide by zero.',
+      ],
       [
         'a power with no real-number result',
         422,
-        { error: 'result is not a real number' },
+        { error: 'result is not a real number', code: 'not_a_real_number' },
         'That calculation has no real-number result.',
       ],
-      ['a result out of range', 422, { error: 'result is out of range' }, 'The result is too large to calculate.'],
+      [
+        'a result out of range',
+        422,
+        { error: 'result is out of range', code: 'result_out_of_range' },
+        'The result is too large to calculate.',
+      ],
       [
         'an unsupported operation',
         400,
-        { error: 'unsupported operation "modulo": must be one of add, subtract, multiply, divide, power, sqrt, percent' },
+        {
+          error: 'unsupported operation "modulo": must be one of add, subtract, multiply, divide, power, sqrt, percent',
+          code: 'unsupported_operation',
+        },
         'That operation is not supported.',
       ],
       [
         'an invalid request',
         400,
-        { error: 'field "a" is required' },
+        { error: 'field "a" is required', code: 'missing_field' },
         'The calculation could not be processed. Check your input and try again.',
       ],
       [
         'an internal server error',
         500,
-        { error: 'internal server error' },
+        { error: 'internal server error', code: 'internal_error' },
         'The calculator service had a problem. Please try again.',
       ],
       ['a bad gateway', 502, '', 'The calculator service is unavailable. Please try again later.'],
@@ -368,7 +401,7 @@ describe('App', () => {
       render(<App />)
 
       press('8', 'Divide', '0', 'Equals')
-      await request.respond(400, { error: 'request body contains unknown field "c"' })
+      await request.respond(400, { error: 'request body contains unknown field "c"', code: 'unknown_field' })
 
       expect(alert()).not.toContain('unknown field')
       expect(document.body.textContent).not.toContain('unknown field')
@@ -400,7 +433,7 @@ describe('App', () => {
       render(<App />)
 
       press('8', 'Divide', '0', 'Equals')
-      await failed.respond(422, { error: 'division by zero' })
+      await failed.respond(422, { error: 'division by zero', code: 'division_by_zero' })
 
       const retried = pendingRequest()
       press('4', 'Equals')
@@ -448,7 +481,7 @@ describe('App', () => {
       render(<App />)
 
       press('8', 'Divide', '0', 'Equals')
-      await request.respond(422, { error: 'division by zero' })
+      await request.respond(422, { error: 'division by zero', code: 'division_by_zero' })
       press('Clear')
 
       expect(alert()).toBeNull()

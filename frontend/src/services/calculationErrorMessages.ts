@@ -19,18 +19,19 @@ export const ERROR_MESSAGES = {
 } as const
 
 /**
- * Error texts the API documents for the failures that deserve a specific
- * message. Anything not listed here falls back to a message chosen by status,
- * so an unrecognized or reworded API error still gets a sensible one.
+ * API error codes that have a message of their own. The codes are part of the
+ * API contract (see contract/api-errors.json), unlike the API's error text.
+ * A code not listed here falls back to a message chosen by status, so an
+ * error the frontend does not know about still gets a sensible one.
  */
-const API_MESSAGE_RULES: ReadonlyArray<{ matches: (apiMessage: string) => boolean; message: string }> = [
-  { matches: (m) => m === 'division by zero', message: ERROR_MESSAGES.divisionByZero },
-  { matches: (m) => m === 'result is out of range', message: ERROR_MESSAGES.resultOutOfRange },
-  { matches: (m) => m === 'result is not a real number', message: ERROR_MESSAGES.notRealNumber },
-  { matches: (m) => m === 'square root of a negative number', message: ERROR_MESSAGES.negativeSquareRoot },
-  { matches: (m) => /^field "[ab]" is out of range$/.test(m), message: ERROR_MESSAGES.operandOutOfRange },
-  { matches: (m) => m.startsWith('unsupported operation '), message: ERROR_MESSAGES.unsupportedOperation },
-]
+const MESSAGE_BY_CODE: ReadonlyMap<string, string> = new Map([
+  ['division_by_zero', ERROR_MESSAGES.divisionByZero],
+  ['result_out_of_range', ERROR_MESSAGES.resultOutOfRange],
+  ['not_a_real_number', ERROR_MESSAGES.notRealNumber],
+  ['negative_square_root', ERROR_MESSAGES.negativeSquareRoot],
+  ['field_out_of_range', ERROR_MESSAGES.operandOutOfRange],
+  ['unsupported_operation', ERROR_MESSAGES.unsupportedOperation],
+])
 
 /** Statuses a proxy or gateway returns when it cannot get an answer from the backend. */
 const GATEWAY_STATUSES = new Set([502, 503, 504])
@@ -51,18 +52,18 @@ export function userMessageFor(error: unknown): string {
     case 'invalid_response':
       return ERROR_MESSAGES.serverError
     case 'http':
-      return httpMessage(error.status, error.apiMessage)
+      return httpMessage(error.status, error.code)
   }
 }
 
-function httpMessage(status: number | null, apiMessage: string | null): string {
+function httpMessage(status: number | null, code: string | null): string {
   if (status === null) return ERROR_MESSAGES.generic
   if (status >= 500) {
     return GATEWAY_STATUSES.has(status) ? ERROR_MESSAGES.unavailable : ERROR_MESSAGES.serverError
   }
 
-  const rule = apiMessage === null ? undefined : API_MESSAGE_RULES.find(({ matches }) => matches(apiMessage))
-  if (rule) return rule.message
+  const message = code === null ? undefined : MESSAGE_BY_CODE.get(code)
+  if (message !== undefined) return message
 
   if (status === 422) return ERROR_MESSAGES.cannotCalculate
   if (status === 400 || status === 413 || status === 415) return ERROR_MESSAGES.invalidRequest

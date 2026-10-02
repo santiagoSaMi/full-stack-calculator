@@ -29,7 +29,7 @@ func handleHealth(w http.ResponseWriter, _ *http.Request) {
 }
 
 func notFound(w http.ResponseWriter, _ *http.Request) {
-	writeError(w, http.StatusNotFound, "not found")
+	writeError(w, http.StatusNotFound, codeNotFound, "not found")
 }
 
 // methodNotAllowed returns a handler that responds with a JSON 405 error and
@@ -37,6 +37,6 @@ func notFound(w http.ResponseWriter, _ *http.Request) {
 func methodNotAllowed(allowed string) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Allow", allowed)
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		writeError(w, http.StatusMethodNotAllowed, codeMethodNotAllowed, "method not allowed")
 	}
 }

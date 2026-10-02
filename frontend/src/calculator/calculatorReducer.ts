@@ -49,9 +49,10 @@ export function calculatorReducer(state: CalculatorState, action: CalculatorActi
       const inProgress = isUnaryRequest(pending)
         ? { firstOperand: state.firstOperand, operation: state.operation }
         : { firstOperand: null, operation: null }
+      // It is kept at full precision; rounding happens only when it is shown.
       return {
         ...inProgress,
-        currentInput: formatNumber(action.result),
+        currentInput: String(action.result),
         inputIsResult: true,
         calculation: { status: 'success', request: pending, result: action.result },
       }
@@ -98,7 +99,9 @@ function reduceInput(state: CalculatorState, action: InputAction): CalculatorSta
     case 'inputDecimal':
       return { ...next, currentInput: appendDecimal(input) }
     case 'toggleSign':
-      return { ...next, currentInput: toggleSign(state.currentInput) }
+      // Negating a result leaves it a result, so the next digit still starts
+      // a new number instead of being appended to it.
+      return { ...next, inputIsResult: state.inputIsResult, currentInput: toggleSign(state.currentInput) }
     case 'selectOperation':
       return selectOperation(next, action.operation)
   }
@@ -154,6 +157,22 @@ export function formatNumber(value: number): string {
 }
 
 /**
+ * Text to show for an operand held in state. A typed operand is shown exactly
+ * as typed (it never exceeds MAX_DIGITS). A result is held at full precision,
+ * so it is rounded for display when it is longer than that or in exponent
+ * notation.
+ */
+function displayOperand(operand: string): string {
+  const isLongResult = countDigits(operand) > MAX_DIGITS || operand.includes('e')
+  return isLongResult ? formatNumber(Number(operand)) : operand
+}
+
+/** The operand a single-operand key acts on: the one shown, at full precision. */
+function shownOperand(state: CalculatorState): string {
+  return state.currentInput || state.firstOperand || '0'
+}
+
+/**
  * Checks whether the current input describes a complete calculation. This is
  * the single place that decides if the calculator can submit, and it checks
  * only what the frontend alone can know: that the entry is complete and the
@@ -183,7 +202,7 @@ export function validateSubmission(state: CalculatorState): Validation {
  * whether the operand is acceptable (e.g. not negative) is the backend's call.
  */
 export function validateUnarySubmission(state: CalculatorState, operation: UnaryOperation): Validation {
-  const a = Number(normalizeOperand(selectDisplayValue(state)))
+  const a = Number(normalizeOperand(shownOperand(state)))
   if (!Number.isFinite(a)) {
     return { ok: false, message: VALIDATION_MESSAGES.invalidNumber }
   }
@@ -196,7 +215,7 @@ export function selectExpression(state: CalculatorState): string {
   const inProgress =
     state.firstOperand === null || state.operation === null
       ? ''
-      : `${formatLeftOperand(state.firstOperand, state.operation)} ${OPERATIONS[state.operation].symbol}`
+      : `${formatLeftOperand(displayOperand(state.firstOperand), state.operation)} ${OPERATIONS[state.operation].symbol}`
 
   if (calculation.status === 'pending' || calculation.status === 'success') {
     const { request } = calculation
@@ -222,7 +241,7 @@ function formatLeftOperand(operand: string, operation: BinaryOperation): string 
 
 /** Text for the display's main line: the operand being typed, or the result. */
 export function selectDisplayValue(state: CalculatorState): string {
-  return state.currentInput || state.firstOperand || '0'
+  return displayOperand(shownOperand(state))
 }
 
 /** Message of the last failed calculation, or null. */

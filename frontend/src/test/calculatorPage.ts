@@ -64,6 +64,11 @@ export function isLoading(): boolean {
   return screen.queryByText('Calculating…') !== null
 }
 
+/** Whether a key is unavailable (it stays focusable, so this is aria-disabled). */
+export function isDisabled(name: KeyName): boolean {
+  return key(name).getAttribute('aria-disabled') === 'true'
+}
+
 /** Whether an operation key is shown as the selected one. */
 export function isSelected(name: KeyName): boolean {
   return key(name).getAttribute('aria-pressed') === 'true'

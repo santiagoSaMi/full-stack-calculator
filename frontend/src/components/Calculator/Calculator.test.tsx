@@ -5,7 +5,7 @@ import { VALIDATION_MESSAGES } from '../../calculator/calculatorReducer.ts'
 import { CalculationError } from '../../calculator/errors.ts'
 import type { CalculationRequest, CalculationService } from '../../calculator/types.ts'
 import type { KeyName } from '../../test/calculatorPage.ts'
-import { alert, expression, isLoading, isSelected, key, KEY_NAMES, press, value } from '../../test/calculatorPage.ts'
+import { alert, expression, isDisabled, isLoading, isSelected, key, KEY_NAMES, press, value } from '../../test/calculatorPage.ts'
 import { Calculator } from './Calculator.tsx'
 
 afterEach(cleanup)
@@ -82,7 +82,7 @@ describe('Calculator', () => {
       renderCalculator()
 
       for (const name of KEY_NAMES) {
-        expect(key(name)).toHaveProperty('disabled', false)
+        expect(isDisabled(name)).toBe(false)
       }
       for (const name of ['Add', 'Subtract', 'Multiply', 'Divide', 'Power'] as const) {
         expect(isSelected(name)).toBe(false)
@@ -394,13 +394,30 @@ describe('Calculator', () => {
       press('6', 'Multiply', '7', 'Equals')
 
       for (const name of KEY_NAMES.filter((name) => name !== 'Clear')) {
-        expect(key(name)).toHaveProperty('disabled', true)
+        expect(isDisabled(name)).toBe(true)
       }
-      expect(key('Clear')).toHaveProperty('disabled', false)
+      expect(isDisabled('Clear')).toBe(false)
 
       await resolve(42)
 
-      expect(key('7')).toHaveProperty('disabled', false)
+      expect(isDisabled('7')).toBe(false)
+    })
+
+    it('keeps keyboard focus on the key that was pressed, during and after loading', async () => {
+      const { service, resolve } = deferredService()
+      render(<Calculator calculate={service} />)
+
+      press('6', 'Multiply', '7')
+      key('Equals').focus()
+      press('Equals')
+
+      expect(isDisabled('Equals')).toBe(true)
+      expect(document.activeElement).toBe(key('Equals'))
+
+      await resolve(42)
+
+      expect(document.activeElement).toBe(key('Equals'))
+      expect(value()).toBe('42')
     })
 
     it('does not submit twice while loading', () => {
@@ -542,7 +559,7 @@ describe('Calculator', () => {
 
       press('9', 'Square root')
 
-      expect(key('Square root')).toHaveProperty('disabled', true)
+      expect(isDisabled('Square root')).toBe(true)
 
       press('Square root')
 
@@ -675,8 +692,73 @@ describe('Calculator', () => {
 
       press('5', '0', 'Percent')
 
-      expect(key('Percent')).toHaveProperty('disabled', true)
+      expect(isDisabled('Percent')).toBe(true)
       expect(service).toHaveBeenCalledOnce()
+    })
+  })
+
+  describe('continuing from a result', () => {
+    it('sends the unrounded result while showing it rounded: 10 ÷ 3 = × 3 =', async () => {
+      const { service, resolve } = renderCalculator()
+
+      press('1', '0', 'Divide', '3', 'Equals')
+      await resolve(10 / 3)
+
+      expect(value()).toBe('3.33333333333333')
+
+      press('Multiply')
+      expect(expression()).toBe('3.33333333333333 ×')
+
+      press('3', 'Equals')
+
+      expect(service).toHaveBeenLastCalledWith({ operation: 'multiply', a: 10 / 3, b: 3 })
+
+      await resolve(10)
+
+      expect(value()).toBe('10')
+    })
+
+    it('applies a single-operand key to the unrounded result', async () => {
+      const { service, resolve } = renderCalculator()
+
+      press('2', 'Square root')
+      await resolve(Math.SQRT2)
+
+      expect(value()).toBe('1.4142135623731')
+
+      press('Power', '2', 'Equals')
+
+      expect(service).toHaveBeenLastCalledWith({ operation: 'power', a: Math.SQRT2, b: 2 })
+    })
+
+    it('starts a new number when a digit follows the sign key on a result', async () => {
+      const { resolve } = renderCalculator()
+
+      press('1', '2', 'Add', '3', 'Equals')
+      await resolve(15)
+      press('Toggle sign')
+
+      expect(value()).toBe('-15')
+
+      press('7')
+
+      expect(value()).toBe('7')
+    })
+
+    it('never appends digits to a result shown in exponent notation', async () => {
+      const { service, resolve } = renderCalculator()
+
+      press('1', 'Divide', '1', '0', '0', '0', '0', '0', '0', '0', 'Equals')
+      await resolve(1e-7)
+
+      expect(value()).toBe('1e-7')
+
+      press('Toggle sign')
+      expect(value()).toBe('-1e-7')
+
+      press('Add', '1', 'Equals')
+
+      expect(service).toHaveBeenLastCalledWith({ operation: 'add', a: -1e-7, b: 1 })
     })
   })
 
@@ -721,20 +803,6 @@ describe('Calculator', () => {
 
       expect(alert()).toBe(VALIDATION_MESSAGES.missingOperation)
       expect(value()).toBe('3')
-      expect(service).toHaveBeenCalledOnce()
-    })
-
-    it('does not send an operand that is not a finite number', async () => {
-      const { service, resolve } = deferredService()
-      render(<Calculator calculate={service} />)
-
-      // A huge result is shown as "1e+21"; negating it and typing more digits
-      // yields "-1e+21999", which is not a finite number.
-      press('1', 'Multiply', '1', 'Equals')
-      await resolve(1e21)
-      press('Toggle sign', '9', '9', '9', 'Add', '1', 'Equals')
-
-      expect(alert()).toBe(VALIDATION_MESSAGES.invalidNumber)
       expect(service).toHaveBeenCalledOnce()
     })
 
@@ -789,8 +857,8 @@ describe('Calculator', () => {
       await reject(new CalculationError('Cannot divide by zero.'))
 
       expect(value()).toBe('0')
-      expect(key('Equals')).toHaveProperty('disabled', false)
-      expect(key('4')).toHaveProperty('disabled', false)
+      expect(isDisabled('Equals')).toBe(false)
+      expect(isDisabled('4')).toBe(false)
     })
 
     it('lets the user correct the input and retry', async () => {

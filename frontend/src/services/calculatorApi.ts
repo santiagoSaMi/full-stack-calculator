@@ -17,6 +17,8 @@ export interface CalculatorApiErrorDetails {
   status?: number
   /** The `error` text of the API's error body, if it sent a valid one. */
   apiMessage?: string
+  /** The `code` of the API's error body, if it sent one. */
+  code?: string
   cause?: unknown
 }
 
@@ -28,8 +30,10 @@ export class CalculatorApiError extends Error {
   readonly kind: CalculatorApiErrorKind
   /** HTTP status of the response, or null if there was none. */
   readonly status: number | null
-  /** The `error` text from the API's error body, or null if there was none. */
+  /** The `error` text from the API's error body, or null if there was none. For logs only. */
   readonly apiMessage: string | null
+  /** The error code from the API's error body, or null if there was none. */
+  readonly code: string | null
 
   constructor(kind: CalculatorApiErrorKind, message: string, details: CalculatorApiErrorDetails = {}) {
     super(message, { cause: details.cause })
@@ -37,6 +41,7 @@ export class CalculatorApiError extends Error {
     this.kind = kind
     this.status = details.status ?? null
     this.apiMessage = details.apiMessage ?? null
+    this.code = details.code ?? null
   }
 }
 
@@ -73,10 +78,11 @@ export async function calculate(
   const body = await readJson(response)
 
   if (!response.ok) {
-    const apiMessage = isApiErrorResponse(body) ? body.error : undefined
-    throw new CalculatorApiError('http', apiMessage ?? `Request failed with status ${status}`, {
+    const apiError = isApiErrorResponse(body) ? body : undefined
+    throw new CalculatorApiError('http', apiError?.error ?? `Request failed with status ${status}`, {
       status,
-      apiMessage,
+      apiMessage: apiError?.error,
+      code: apiError?.code,
     })
   }
   if (!isCalculateResponse(body)) {
@@ -113,7 +119,12 @@ function isCalculateResponse(value: unknown): value is CalculateResponse {
 }
 
 function isApiErrorResponse(value: unknown): value is ApiErrorResponse {
-  return isObject(value) && typeof value.error === 'string' && value.error !== ''
+  return (
+    isObject(value) &&
+    typeof value.error === 'string' &&
+    value.error !== '' &&
+    (value.code === undefined || typeof value.code === 'string')
+  )
 }
 
 function isDomException(error: unknown, name: string): boolean {
