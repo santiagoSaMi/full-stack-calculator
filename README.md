@@ -89,6 +89,8 @@ The reasoning behind this structure is in [Design rationale](#design-rationale).
 .
 ├── README.md
 ├── compose.yaml                  builds and runs both containers
+├── Dockerfile                    one image running frontend and backend together
+├── docker/                       start script for the single-container image
 ├── contract/                     error cases both test suites check (see Error handling)
 ├── backend/
 │   ├── Dockerfile                multi-stage build: static binary on a minimal base
@@ -222,6 +224,33 @@ Both are multi-stage builds, so compilers, `node_modules` and source code stay o
 - **The backend is looked up as requests arrive**, not once when nginx starts. If the backend container is recreated with a new address, nginx finds it again within about 10 seconds, and the frontend container can start before the backend exists.
 - **The backend is not published to the host.** It is reachable only through nginx, on the network Compose creates.
 - **The backend's `/health` endpoint is not exposed through nginx**, which forwards only `/api/`.
+
+### One container for everything
+
+The `Dockerfile` at the repository root builds a single image that runs the frontend and the backend together. It suits hosts that run one container per application.
+
+```bash
+docker build -t calculator .
+docker run --rm -p 3000:8080 calculator
+```
+
+Open <http://localhost:3000>. Stop with `Ctrl+C`.
+
+| | Two containers (`compose.yaml`) | One container (`Dockerfile`) |
+|---|---|---|
+| Images | `backend` (about 16 MB) and `frontend` (about 82 MB) | One, about 92 MB |
+| Processes per container | One | Two: nginx and the Go API |
+| Scaling and restarts | Each service on its own | Both together |
+
+Inside the container, nginx listens on port 8080 and forwards `/api/` to the API on port 8081, which is not published. It uses the same nginx configuration as the frontend image.
+
+Because the container runs two processes, a small script (`docker/start.sh`) starts both and watches them:
+
+- If either process exits, it stops the other and the container exits with status 1, so a restart policy can replace it. A container with only half the application running never stays up.
+- On `docker stop` or `Ctrl+C` it stops both and exits with status 0. The API finishes in-flight requests first.
+- The image's health check passes only when the page is served and the API answers.
+
+The two-container setup remains the better fit when the services should be scaled, restarted or deployed separately.
 
 ### Without Compose
 
@@ -566,7 +595,7 @@ Tests enforce the rule: they make the mocked API answer `2 + 2` with `5` and che
 - **No keyboard number entry.** The keys can be focused and pressed with the keyboard, but typing digits on the keyboard does not enter them.
 - **No calculation history, and no memory keys.**
 - **One operation at a time.** Selecting a new operation when both numbers are entered switches the operation; it does not evaluate the pending one first.
-- **The Docker setup is a starting point for deployment, not a complete one.** It has no HTTPS, no container health check for the backend (its image has no shell to run one), and no resource limits or orchestration.
+- **The Docker setup is a starting point for deployment, not a complete one.** It has no HTTPS, no container health check for the backend image used by Compose (it has no shell to run one), and no resource limits or orchestration.
 - **No CORS support.** The backend sends no CORS headers, so the frontend and the API must be served from one origin, as the dev proxy and the nginx container both arrange.
 - **64-bit floating point.** Numbers are IEEE 754 doubles on both sides, so results have about 15 to 17 significant digits. Results are shown rounded to 15 digits but carried into the next calculation exactly, so floating-point effects the display hides can surface later: `0.1 + 0.2 =` shows `0.3`, and `− 0.3 =` then shows `5.55111512312578e-17`, not `0`.
 - **No authentication or rate limiting.**

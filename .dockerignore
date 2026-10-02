@@ -1,0 +1,17 @@
+# Applies to builds from the repository root (the single-container image).
+# The backend/ and frontend/ folders have their own for the Compose builds.
+
+.git
+
+# Installed and generated files are rebuilt inside the image.
+**/node_modules/
+**/dist/
+**/coverage/
+**/coverage.out
+**/coverage.html
+**/bin/
+
+# Local settings must not leak into the image.
+**/.env
+**/.env.*
+!**/.env.example
